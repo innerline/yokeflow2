@@ -1,0 +1,74 @@
+# Agent-generated output directories
+generations/
+
+# Log files
+logs/
+*.jsonl
+*.log
+docker-watchdog.log
+api.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Node.js
+node_modules/
+.next/
+.playwright-mcp/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.local.example
+
+# Database
+postgres_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Coverage and testing
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Build artifacts
+*.egg-info/
+dist-packages/
+*.whl
+
+# for proposed Prompt Improvements new branch
+# keep in local workspace - do not commit
+.archived-features/
+
+prompts/active
+prompts/proposals
+prompts/versions
+
+

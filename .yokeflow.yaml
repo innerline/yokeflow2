@@ -1,0 +1,41 @@
+# YokeFlow Configuration - Playwright Docker Enabled
+
+models:
+  initializer: claude-opus-4-5-20251101
+  coding: claude-sonnet-4-5-20250929
+
+timing:
+  auto_continue_delay: 3
+  web_ui_poll_interval: 5
+
+sandbox:
+  type: docker
+  docker_image: yokeflow-playwright:latest  # Using Playwright-enabled image
+  docker_network: bridge
+  docker_memory_limit: 3g  # Increased for browser operations
+  docker_cpu_limit: 2.0
+  docker_ports: []  # No port forwarding needed - Playwright runs inside container!
+
+project:
+  default_generations_dir: generations
+  max_iterations: null  # unlimited
+
+review:
+  min_reviews_for_analysis: 5  # Minimum deep reviews required for prompt improvement analysis
+
+# Intervention system to prevent infinite loops and notify on blockers
+intervention:
+  # Enable the intervention system
+  enabled: true
+
+  # Maximum retry attempts before blocking (default: 3)
+  max_retries: 3
+
+  # Error rate threshold - pause if error rate exceeds this (default: 0.15 = 15%)
+  error_rate_threshold: 0.15
+
+  # Session duration limit - pause after this many seconds on same task (default: 600 = 10 min)
+  session_duration_limit: 600
+
+  # Detect infrastructure errors like Prisma, Redis, Database issues (default: true)
+  detect_infrastructure_errors: true
