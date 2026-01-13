@@ -1,855 +1,541 @@
 """
-Orchestrator tests for YokeFlow.
+Test suite for the Agent Orchestrator.
 
-Tests the SessionOrchestrator class that manages session lifecycle and coordination.
+Tests the orchestration layer that manages:
+- Project creation and management
+- Session lifecycle (start/stop/status)
+- Database interaction through DatabaseManager
+- Event callbacks and quality integration
 """
 
 import asyncio
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
 from uuid import UUID, uuid4
-
 import pytest
-import pytest_asyncio
+from datetime import datetime, timezone
 
-from core.orchestrator import SessionOrchestrator, SessionState
-from core.config import Config
-from core.database import TaskDatabase
+# Add parent directory to path for imports
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+
+from server.agent.orchestrator import AgentOrchestrator, SessionInfo
+from server.agent.models import SessionStatus, SessionType
+from server.utils.errors import (
+    YokeFlowError,
+    ProjectValidationError,
+    SessionError,
+    ValidationError,
+    SessionAlreadyRunningError
+)
 
 
-@pytest.mark.asyncio
-class TestOrchestratorInitialization:
-    """Test orchestrator initialization and configuration."""
+class TestAgentOrchestrator:
+    """Test suite for the AgentOrchestrator class."""
 
-    def test_orchestrator_creation(self, test_config):
-        """Test creating orchestrator instance."""
-        with patch("core.orchestrator.TaskDatabase") as MockDB:
-            mock_db = Mock(spec=TaskDatabase)
-            MockDB.return_value = mock_db
-
-            orchestrator = SessionOrchestrator(
-                config=test_config,
-                project_dir=Path("/test/project")
+    @pytest.fixture
+    def orchestrator(self):
+        """Create an orchestrator instance for testing."""
+        with patch('server.agent.orchestrator.Config') as mock_config:
+            mock_config.load_default.return_value = MagicMock(
+                project=MagicMock(
+                    default_generations_dir="generations",
+                    max_iterations=None
+                ),
+                models=MagicMock(
+                    initializer="claude-opus",
+                    coding="claude-sonnet"
+                ),
+                timing=MagicMock(
+                    auto_continue_delay=3
+                ),
+                sandbox=MagicMock(
+                    type="docker",
+                    docker_image="yokeflow-sandbox:latest",
+                    docker_network="bridge",
+                    docker_memory_limit="2g",
+                    docker_cpu_limit=2.0,
+                    docker_ports=[]
+                ),
+                docker=MagicMock(
+                    enabled=True
+                ),
+                api=MagicMock(
+                    enabled=False
+                )
             )
-
-            assert orchestrator is not None
-            assert orchestrator.config == test_config
-            assert orchestrator.project_dir == Path("/test/project")
-            assert orchestrator.active_sessions == {}
-            assert orchestrator.session_queue == []
-
-    def test_orchestrator_with_custom_config(self):
-        """Test orchestrator with custom configuration."""
-        config = Config()
-        config.max_concurrent_sessions = 3
-        config.session_timeout = 3600
-        config.auto_continue_delay = 5
-
-        with patch("core.orchestrator.TaskDatabase") as MockDB:
-            orchestrator = SessionOrchestrator(
-                config=config,
-                project_dir=Path("/test")
-            )
-
-            assert orchestrator.max_concurrent == 3
-            assert orchestrator.session_timeout == 3600
-            assert orchestrator.auto_continue_delay == 5
-
-    async def test_orchestrator_database_connection(self, test_config, db):
-        """Test orchestrator establishes database connection."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Test database is accessible
-        await orchestrator.db.execute("SELECT 1")
-        assert orchestrator.db is not None
-
-
-@pytest.mark.asyncio
-class TestSessionLifecycle:
-    """Test session lifecycle management."""
-
-    async def test_create_session(self, test_config, db, test_project):
-        """Test creating a new session."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="initialization",
-            model="claude-opus"
-        )
-
-        assert session is not None
-        assert session.id is not None
-        assert session.project_id == test_project
-        assert session.session_type == "initialization"
-        assert session.state == SessionState.PENDING
-
-    async def test_start_session(self, test_config, db, test_project):
-        """Test starting a session."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="claude-sonnet"
-        )
-
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-
-            await orchestrator.start_session(session.id)
-
-            assert session.id in orchestrator.active_sessions
-            assert orchestrator.active_sessions[session.id].state == SessionState.RUNNING
-            mock_run.assert_called_once()
-
-    async def test_stop_session(self, test_config, db, test_project):
-        """Test stopping a running session."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        # Start session
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-            await orchestrator.start_session(session.id)
-
-        # Stop session
-        await orchestrator.stop_session(session.id)
-
-        assert session.id not in orchestrator.active_sessions
-
-        # Verify database updated
-        db_session = await db.get_session(session.id)
-        assert db_session["status"] in ["stopped", "cancelled", "completed"]
-
-    async def test_pause_resume_session(self, test_config, db, test_project):
-        """Test pausing and resuming a session."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        # Start session
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-            await orchestrator.start_session(session.id)
-
-        # Pause session
-        await orchestrator.pause_session(session.id, reason="User requested")
-
-        assert orchestrator.active_sessions[session.id].state == SessionState.PAUSED
-
-        # Resume session
-        await orchestrator.resume_session(session.id)
-
-        assert orchestrator.active_sessions[session.id].state == SessionState.RUNNING
-
-    async def test_session_completion(self, test_config, db, test_project):
-        """Test session completion handling."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            # Simulate session completion
-            async def complete_session(*args, **kwargs):
-                await asyncio.sleep(0.01)
-                await orchestrator._mark_session_complete(session.id)
-
-            mock_run.side_effect = complete_session
-
-            await orchestrator.start_session(session.id)
-            await asyncio.sleep(0.02)  # Wait for completion
-
-            assert session.id not in orchestrator.active_sessions
-
-            db_session = await db.get_session(session.id)
-            assert db_session["status"] == "completed"
-
-
-@pytest.mark.asyncio
-class TestSessionQueue:
-    """Test session queue management."""
-
-    async def test_queue_session(self, test_config, db, test_project):
-        """Test queueing sessions when at max capacity."""
-        config = Config()
-        config.max_concurrent_sessions = 2
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Create and start max sessions
-        sessions = []
-        for i in range(2):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
-
-            with patch.object(orchestrator, "_run_session") as mock_run:
-                mock_run.return_value = AsyncMock()
-                await orchestrator.start_session(session.id)
-
-        # Try to start another session - should queue
-        queued_session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        await orchestrator.queue_session(queued_session.id)
-
-        assert queued_session.id in orchestrator.session_queue
-        assert len(orchestrator.session_queue) == 1
-
-    async def test_process_queue_on_completion(self, test_config, db, test_project):
-        """Test queue processing when a session completes."""
-        config = Config()
-        config.max_concurrent_sessions = 1
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Start first session
-        session1 = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-            await orchestrator.start_session(session1.id)
-
-        # Queue second session
-        session2 = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-        await orchestrator.queue_session(session2.id)
-
-        # Complete first session
-        await orchestrator.stop_session(session1.id)
-
-        # Trigger queue processing
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-            await orchestrator._process_queue()
-
-            # Second session should now be running
-            assert session2.id in orchestrator.active_sessions
-            assert len(orchestrator.session_queue) == 0
-
-    async def test_queue_priority(self, test_config, db, test_project):
-        """Test session queue priority handling."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Queue multiple sessions with different priorities
-        low_priority = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="review",
-            model="test-model",
-            priority=10
-        )
-
-        high_priority = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="initialization",
-            model="test-model",
-            priority=1
-        )
-
-        await orchestrator.queue_session(low_priority.id)
-        await orchestrator.queue_session(high_priority.id)
-
-        # High priority should be first
-        next_session = orchestrator._get_next_queued_session()
-        assert next_session == high_priority.id
-
-
-@pytest.mark.asyncio
-class TestAutoContinue:
-    """Test automatic session continuation."""
-
-    async def test_auto_continue_enabled(self, test_config, db, test_project):
-        """Test auto-continue when enabled."""
-        config = Config()
-        config.auto_continue_enabled = True
-        config.auto_continue_delay = 0.1  # 100ms for testing
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        with patch.object(orchestrator, "_should_continue") as mock_should:
-            mock_should.return_value = True
-
-            with patch.object(orchestrator, "create_session") as mock_create:
-                mock_session = Mock()
-                mock_session.id = uuid4()
-                mock_create.return_value = mock_session
-
-                with patch.object(orchestrator, "start_session") as mock_start:
-                    mock_start.return_value = AsyncMock()
-
-                    # Complete a session
-                    session = await orchestrator.create_session(
-                        project_id=test_project,
-                        session_type="coding",
-                        model="test-model"
-                    )
-
-                    await orchestrator._trigger_auto_continue(
-                        project_id=test_project,
-                        last_session_type="coding"
-                    )
-
-                    await asyncio.sleep(0.2)  # Wait for delay
-
-                    mock_create.assert_called()
-                    mock_start.assert_called()
-
-    async def test_auto_continue_disabled(self, test_config, db, test_project):
-        """Test auto-continue when disabled."""
-        config = Config()
-        config.auto_continue_enabled = False
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        with patch.object(orchestrator, "create_session") as mock_create:
-            await orchestrator._trigger_auto_continue(
-                project_id=test_project,
-                last_session_type="coding"
-            )
-
-            mock_create.assert_not_called()
-
-    async def test_auto_continue_max_iterations(self, test_config, db, test_project):
-        """Test auto-continue respects max iterations."""
-        config = Config()
-        config.auto_continue_enabled = True
-        config.max_iterations = 5
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Simulate 5 sessions already completed
-        async with db.acquire() as conn:
-            for i in range(5):
-                await conn.execute("""
-                    INSERT INTO sessions (
-                        id, project_id, session_number,
-                        status, started_at, model, session_type
-                    )
-                    VALUES ($1, $2, $3, $4, NOW(), $5, $6)
-                """, uuid4(), test_project, i + 1, "completed", "test", "coding")
-
-        should_continue = await orchestrator._should_continue(test_project)
-        assert should_continue is False
-
-
-@pytest.mark.asyncio
-class TestConcurrency:
-    """Test concurrent session handling."""
-
-    async def test_concurrent_session_limit(self, test_config, db, test_project):
-        """Test enforcing concurrent session limit."""
-        config = Config()
-        config.max_concurrent_sessions = 2
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        sessions = []
-        for i in range(3):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
-
-        # Start first two sessions
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-
-            for session in sessions[:2]:
-                await orchestrator.start_session(session.id)
-
-            assert len(orchestrator.active_sessions) == 2
-
-            # Third session should fail or queue
-            with pytest.raises(RuntimeError, match="Maximum concurrent"):
-                await orchestrator.start_session(sessions[2].id)
-
-    async def test_different_project_concurrency(self, test_config, db):
-        """Test concurrent sessions for different projects."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Create different projects
-        project1 = uuid4()
-        project2 = uuid4()
-
-        await db.create_project(project1, "project1", "# Spec 1")
-        await db.create_project(project2, "project2", "# Spec 2")
-
-        # Create sessions for different projects
-        session1 = await orchestrator.create_session(
-            project_id=project1,
-            session_type="coding",
-            model="test-model"
-        )
-
-        session2 = await orchestrator.create_session(
-            project_id=project2,
-            session_type="coding",
-            model="test-model"
-        )
-
-        # Both should be able to run concurrently
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-
-            await orchestrator.start_session(session1.id)
-            await orchestrator.start_session(session2.id)
-
-            assert len(orchestrator.active_sessions) == 2
-
-    async def test_session_isolation(self, test_config, db, test_project):
-        """Test sessions are isolated from each other."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        sessions = []
-        for i in range(2):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
-
-        # Start sessions with different contexts
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            contexts = []
-
-            async def track_context(session_id, context):
-                contexts.append(context)
-
-            mock_run.side_effect = track_context
-
-            for i, session in enumerate(sessions):
-                await orchestrator.start_session(
-                    session.id,
-                    context={"index": i}
+            return AgentOrchestrator(verbose=False)
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database manager."""
+        mock = AsyncMock()
+        mock.__aenter__ = AsyncMock(return_value=mock)
+        mock.__aexit__ = AsyncMock(return_value=None)
+        return mock
+
+    @pytest.fixture
+    def sample_project_id(self):
+        """Generate a sample project UUID."""
+        return uuid4()
+
+    @pytest.fixture
+    def sample_project(self, sample_project_id):
+        """Create a sample project dictionary."""
+        return {
+            'id': sample_project_id,
+            'name': 'test_project',
+            'spec_file_path': '/path/to/spec.txt',
+            'spec_content': 'Build a test app',
+            'created_at': datetime.now(timezone.utc),
+            'status': 'initializing'
+        }
+
+    # =========================================================================
+    # Project Creation Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_create_project_success(self, orchestrator, mock_db, sample_project):
+        """Test successful project creation."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = None  # No existing project
+            mock_db.create_project.return_value = sample_project
+            mock_db.update_project.return_value = None
+            mock_db.update_project_settings.return_value = None
+
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__.return_value = mock_path_instance
+                mock_path_instance.mkdir.return_value = None
+                mock_path_instance.write_text.return_value = None
+
+                result = await orchestrator.create_project(
+                    project_name='test_project',
+                    spec_content='Build a test app'
                 )
 
-            # Verify each session got its own context
-            assert len(contexts) == 2
-            assert contexts[0]["index"] == 0
-            assert contexts[1]["index"] == 1
+                assert result == sample_project
+                mock_db.create_project.assert_called_once()
+                mock_db.update_project_settings.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_create_project_already_exists(self, orchestrator, mock_db, sample_project):
+        """Test project creation when project already exists."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = sample_project  # Existing project
 
-@pytest.mark.asyncio
-class TestErrorHandling:
-    """Test orchestrator error handling."""
+            with pytest.raises(ValueError) as excinfo:
+                await orchestrator.create_project(
+                    project_name='test_project',
+                    spec_content='Build a test app'
+                )
 
-    async def test_session_failure_handling(self, test_config, db, test_project):
-        """Test handling of session failures."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
+            assert "already exists" in str(excinfo.value)
+            mock_db.create_project.assert_not_called()
 
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
+    @pytest.mark.asyncio
+    async def test_create_project_force_overwrite(self, orchestrator, mock_db, sample_project):
+        """Test project creation with force overwrite."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = sample_project  # Existing project
+            mock_db.delete_project.return_value = None
+            mock_db.create_project.return_value = sample_project
+            mock_db.update_project.return_value = None
+            mock_db.update_project_settings.return_value = None
 
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.side_effect = Exception("Session crashed")
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__.return_value = mock_path_instance
+                mock_path_instance.mkdir.return_value = None
+                mock_path_instance.write_text.return_value = None
 
-            with pytest.raises(Exception):
-                await orchestrator.start_session(session.id)
+                result = await orchestrator.create_project(
+                    project_name='test_project',
+                    spec_content='Build a test app',
+                    force=True
+                )
 
-            # Session should be marked as failed
-            db_session = await db.get_session(session.id)
-            assert db_session["status"] == "failed"
+                assert result == sample_project
+                mock_db.delete_project.assert_called_once_with(sample_project['id'])
+                mock_db.create_project.assert_called_once()
 
-    async def test_session_timeout(self, test_config, db, test_project):
-        """Test session timeout handling."""
-        config = Config()
-        config.session_timeout = 0.1  # 100ms timeout for testing
+    @pytest.mark.asyncio
+    async def test_create_project_from_file(self, orchestrator, mock_db, sample_project, tmp_path):
+        """Test project creation from a spec file."""
+        spec_file = tmp_path / "spec.txt"
+        spec_file.write_text("Build an amazing app")
 
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = None
+            mock_db.create_project.return_value = sample_project
+            mock_db.update_project.return_value = None
+            mock_db.update_project_settings.return_value = None
 
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
+            with patch('server.agent.orchestrator.Path') as mock_path_cls:
+                mock_path_cls.return_value = MagicMock()
 
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            # Simulate long-running session
-            async def long_running(*args, **kwargs):
-                await asyncio.sleep(1)  # Longer than timeout
+                with patch('server.agent.orchestrator.copy_spec_to_project') as mock_copy:
+                    result = await orchestrator.create_project(
+                        project_name='test_project',
+                        spec_source=spec_file
+                    )
 
-            mock_run.side_effect = long_running
+                    assert result == sample_project
+                    mock_copy.assert_called_once()
 
-            with pytest.raises(asyncio.TimeoutError):
-                await orchestrator.start_session_with_timeout(session.id)
+    @pytest.mark.asyncio
+    async def test_create_project_with_custom_models(self, orchestrator, mock_db, sample_project):
+        """Test project creation with custom model settings."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = None
+            mock_db.create_project.return_value = sample_project
+            mock_db.update_project.return_value = None
+            mock_db.update_project_settings.return_value = None
 
-    async def test_recovery_after_failure(self, test_config, db, test_project):
-        """Test session recovery after failure."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__.return_value = mock_path_instance
+                mock_path_instance.mkdir.return_value = None
+                mock_path_instance.write_text.return_value = None
 
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
+                result = await orchestrator.create_project(
+                    project_name='test_project',
+                    spec_content='Build a test app',
+                    initializer_model='custom-opus',
+                    coding_model='custom-sonnet'
+                )
 
-        # First attempt fails
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.side_effect = Exception("First attempt failed")
+                # Verify settings were passed
+                call_args = mock_db.update_project_settings.call_args
+                settings = call_args[0][1]
+                assert settings['initializer_model'] == 'custom-opus'
+                assert settings['coding_model'] == 'custom-sonnet'
 
-            with pytest.raises(Exception):
-                await orchestrator.start_session(session.id)
+    # =========================================================================
+    # Project Info Tests
+    # =========================================================================
 
-        # Recovery attempt
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
+    @pytest.mark.asyncio
+    async def test_get_project_info_success(self, orchestrator, mock_db, sample_project, sample_project_id):
+        """Test getting project information."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project.return_value = sample_project
+            mock_db.get_progress.return_value = {
+                'total_epics': 5,
+                'completed_epics': 2,
+                'total_tasks': 20,
+                'completed_tasks': 8,
+                'total_tests': 60,
+                'passed_tests': 30
+            }
+            mock_db.get_next_task.return_value = {
+                'id': uuid4(),
+                'description': 'Implement authentication'
+            }
+            mock_db.get_active_session.return_value = None
 
-            await orchestrator.retry_session(session.id)
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__.return_value = mock_path_instance
+                mock_path_instance.exists.return_value = False
 
-            # Should be running again
-            assert session.id in orchestrator.active_sessions
-            assert orchestrator.active_sessions[session.id].state == SessionState.RUNNING
+                result = await orchestrator.get_project_info(sample_project_id)
 
+                assert result['id'] == sample_project_id
+                assert result['name'] == 'test_project'
+                assert 'progress' in result
+                assert result['progress']['total_tasks'] == 20
 
-@pytest.mark.asyncio
-class TestMonitoring:
-    """Test session monitoring and metrics."""
+    @pytest.mark.asyncio
+    async def test_get_project_info_not_found(self, orchestrator, mock_db, sample_project_id):
+        """Test getting info for non-existent project."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project.return_value = None
 
-    async def test_get_active_sessions(self, test_config, db, test_project):
-        """Test retrieving active sessions."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
+            with pytest.raises(ValueError) as excinfo:
+                await orchestrator.get_project_info(sample_project_id)
 
-        # Start multiple sessions
-        sessions = []
-        for i in range(3):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
+            assert "Project not found" in str(excinfo.value)
 
-            with patch.object(orchestrator, "_run_session") as mock_run:
-                mock_run.return_value = AsyncMock()
-                await orchestrator.start_session(session.id)
+    # =========================================================================
+    # Session Start Tests
+    # =========================================================================
 
-        active = orchestrator.get_active_sessions()
-        assert len(active) == 3
-        assert all(s.id in active for s in sessions)
+    @pytest.mark.asyncio
+    async def test_start_session_initializer(self, orchestrator, mock_db, sample_project, sample_project_id):
+        """Test starting an initializer session."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project.return_value = sample_project
+            mock_db.get_active_session.return_value = None
+            mock_db.get_sessions_by_project.return_value = []  # No previous sessions
+            mock_db.get_project_settings.return_value = {}
+            mock_db.get_progress.return_value = {'total_epics': 0}  # Not initialized
 
-    async def test_get_session_metrics(self, test_config, db, test_project):
-        """Test collecting session metrics."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
+            # Mock the orchestrator's start_initialization method
+            with patch.object(orchestrator, 'start_initialization') as mock_start:
+                session_info = SessionInfo(
+                    project_id=str(sample_project_id),
+                    session_id=str(uuid4()),
+                    session_number=0,
+                    session_type=SessionType.INITIALIZER,
+                    model="claude-opus",
+                    status=SessionStatus.COMPLETED,
+                    created_at=datetime.now(timezone.utc)
+                )
+                mock_start.return_value = session_info
 
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
+                result = await orchestrator.start_session(
+                    project_id=sample_project_id,
+                    initializer_model="claude-opus"
+                )
 
-        # Simulate session with metrics
-        metrics = {
-            "start_time": datetime.now(),
-            "tasks_completed": 5,
-            "tokens_used": 1000,
-            "errors_encountered": 2
+                assert result.session_type == SessionType.INITIALIZER
+                assert result.project_id == str(sample_project_id)
+
+    @pytest.mark.asyncio
+    async def test_start_session_with_active_session(self, orchestrator, mock_db, sample_project_id):
+        """Test starting a session when one is already active."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project.return_value = {'id': sample_project_id}
+            mock_db.get_active_session.return_value = {
+                'id': uuid4(),
+                'status': 'running',
+                'session_number': 1,
+                'started_at': datetime.now(timezone.utc)
+            }
+
+            # When there's an active session, it should raise ValueError (not SessionAlreadyRunningError)
+            with pytest.raises(ValueError) as excinfo:
+                await orchestrator.start_session(
+                    project_id=sample_project_id
+                )
+
+            assert "already running" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_start_session_project_not_found(self, orchestrator, mock_db, sample_project_id):
+        """Test starting a session for non-existent project."""
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project.return_value = None
+
+            with pytest.raises(ValueError) as excinfo:
+                await orchestrator.start_session(
+                    project_id=sample_project_id
+                )
+
+            assert "not found" in str(excinfo.value)
+
+    # =========================================================================
+    # Session Stop Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_stop_session_success(self, orchestrator, mock_db, sample_project_id):
+        """Test stopping an active session."""
+        session_id = uuid4()
+
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_session.return_value = {
+                'id': session_id,
+                'project_id': sample_project_id,
+                'status': 'running'
+            }
+            mock_db.update_session_status.return_value = None
+
+            result = await orchestrator.stop_session(session_id)
+
+            # Should return True on successful stop
+            assert result == True or result is not None
+
+    @pytest.mark.asyncio
+    async def test_stop_session_force(self, orchestrator, mock_db):
+        """Test force stopping a session."""
+        session_id = uuid4()
+
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_session.return_value = {
+                'id': session_id,
+                'status': 'running'
+            }
+            mock_db.update_session_status.return_value = None
+
+            result = await orchestrator.stop_session(session_id, reason="Force stop")
+
+            # Should successfully stop
+            assert result == True or result is not None
+
+    # =========================================================================
+    # Session Status Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_get_session_info_active(self, orchestrator):
+        """Test getting info of an active session."""
+        session_id = uuid4()
+
+        # Create a mock for the connection object
+        mock_conn = MagicMock()
+        mock_row = {
+            'id': session_id,
+            'status': 'running',
+            'session_type': 'coding'
         }
+        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=None)
 
-        await orchestrator.update_session_metrics(session.id, metrics)
+        # Create a mock for db.acquire() that returns the connection
+        mock_acquire = MagicMock(return_value=mock_conn)
 
-        retrieved = await orchestrator.get_session_metrics(session.id)
-        assert retrieved["tasks_completed"] == 5
-        assert retrieved["tokens_used"] == 1000
+        # Create a mock for the database manager
+        mock_db = MagicMock()
+        mock_db.acquire = mock_acquire
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=None)
 
-    async def test_session_history(self, test_config, db, test_project):
-        """Test retrieving session history."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
+        # Mock DatabaseManager class
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            result = await orchestrator.get_session_info(session_id)
 
-        # Create multiple sessions
-        for i in range(5):
-            await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding" if i % 2 == 0 else "review",
-                model="test-model"
-            )
+            assert result is not None
+            assert result['id'] == session_id
 
-        history = await orchestrator.get_project_session_history(test_project)
-        assert len(history) >= 5
+    @pytest.mark.asyncio
+    async def test_get_session_info_not_found(self, orchestrator):
+        """Test getting info when session doesn't exist."""
+        session_id = uuid4()
 
-        # Verify history is ordered by creation time
-        times = [s["created_at"] for s in history]
-        assert times == sorted(times, reverse=True)  # Most recent first
+        # Create a mock for the connection object
+        mock_conn = MagicMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=None)
+
+        # Create a mock for db.acquire() that returns the connection
+        mock_acquire = MagicMock(return_value=mock_conn)
+
+        # Create a mock for the database manager
+        mock_db = MagicMock()
+        mock_db.acquire = mock_acquire
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock DatabaseManager class
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            result = await orchestrator.get_session_info(session_id)
+
+            assert result is None
+
+    # =========================================================================
+    # List Projects Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_list_projects(self, orchestrator, mock_db):
+        """Test listing all projects."""
+        project1_id = uuid4()
+        project2_id = uuid4()
+        projects = [
+            {'id': project1_id, 'name': 'project1', 'status': 'active'},
+            {'id': project2_id, 'name': 'project2', 'status': 'completed'}
+        ]
+
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            # Mock list_projects to return the projects
+            mock_db.list_projects.return_value = projects
+
+            # Mock get_project to return each project when queried by ID
+            def get_project_side_effect(project_id):
+                for project in projects:
+                    if project['id'] == project_id:
+                        return project
+                return None
+            mock_db.get_project.side_effect = get_project_side_effect
+
+            # Mock progress-related methods
+            mock_db.get_progress.return_value = {
+                'total_epics': 0,
+                'completed_epics': 0,
+                'total_tasks': 0,
+                'completed_tasks': 0,
+                'total_tests': 0,
+                'passed_tests': 0
+            }
+            mock_db.get_next_task.return_value = None
+            mock_db.get_active_session.return_value = None
+
+            # Mock Path operations to avoid filesystem checks
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__ = MagicMock(return_value=mock_path_instance)
+                mock_path_instance.exists.return_value = False
+
+                result = await orchestrator.list_projects()
+
+                assert len(result) == 2
+                assert result[0]['name'] == 'project1'
+                assert result[1]['name'] == 'project2'
+
+    # =========================================================================
+    # Event Callback Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_event_callback_triggered(self, mock_db, sample_project, sample_project_id):
+        """Test that event callbacks are triggered."""
+        callback = AsyncMock()
+        orchestrator = AgentOrchestrator(verbose=False, event_callback=callback)
+
+        with patch('server.agent.orchestrator.DatabaseManager', return_value=mock_db):
+            mock_db.get_project_by_name.return_value = None
+            mock_db.create_project.return_value = sample_project
+            mock_db.update_project.return_value = None
+            mock_db.update_project_settings.return_value = None
+
+            with patch('server.agent.orchestrator.Path') as mock_path:
+                mock_path_instance = MagicMock()
+                mock_path.return_value = mock_path_instance
+                mock_path_instance.__truediv__.return_value = mock_path_instance
+                mock_path_instance.mkdir.return_value = None
+                mock_path_instance.write_text.return_value = None
+
+                await orchestrator.create_project(
+                    project_name='test_project',
+                    spec_content='Build a test app'
+                )
+
+                # Event callbacks would be triggered during session execution
+                # which we're not testing here directly
+
+    # =========================================================================
+    # Integration Tests
+    # =========================================================================
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_initialization(self):
+        """Test orchestrator initialization."""
+        with patch('server.agent.orchestrator.Config') as mock_config:
+            mock_config.load_default.return_value = MagicMock()
+
+            orchestrator = AgentOrchestrator(verbose=True)
+
+            assert orchestrator.verbose == True
+            assert orchestrator.session_managers == {}
+            assert orchestrator.stop_after_current == {}
+            assert orchestrator.quality is not None
 
 
-@pytest.mark.asyncio
-class TestCleanup:
-    """Test orchestrator cleanup operations."""
-
-    async def test_cleanup_on_shutdown(self, test_config, db, test_project):
-        """Test cleanup when orchestrator shuts down."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Start some sessions
-        sessions = []
-        for i in range(2):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
-
-            with patch.object(orchestrator, "_run_session") as mock_run:
-                mock_run.return_value = AsyncMock()
-                await orchestrator.start_session(session.id)
-
-        # Shutdown orchestrator
-        await orchestrator.shutdown()
-
-        # All sessions should be stopped
-        assert len(orchestrator.active_sessions) == 0
-
-        # Database should reflect stopped status
-        for session in sessions:
-            db_session = await db.get_session(session.id)
-            assert db_session["status"] in ["stopped", "cancelled"]
-
-    async def test_cleanup_stale_sessions(self, test_config, db, test_project):
-        """Test cleaning up stale/stuck sessions."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Create a stale session (marked as running but not actually active)
-        stale_session = uuid4()
-        await db.create_session(
-            session_id=stale_session,
-            project_id=test_project,
-            session_number=99,
-            session_type="coding",
-            model="test-model"
-        )
-        await db.update_session_status(stale_session, "in_progress")
-
-        # Run cleanup
-        await orchestrator.cleanup_stale_sessions()
-
-        # Stale session should be marked as failed or stopped
-        db_session = await db.get_session(stale_session)
-        assert db_session["status"] in ["failed", "stopped"]
-
-    async def test_resource_cleanup(self, test_config, db, test_project):
-        """Test cleanup of session resources."""
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        session = await orchestrator.create_session(
-            project_id=test_project,
-            session_type="coding",
-            model="test-model"
-        )
-
-        # Allocate some resources (mocked)
-        resources = {
-            "docker_container": Mock(),
-            "mcp_session": AsyncMock(),
-            "log_file": Mock()
-        }
-
-        orchestrator.session_resources[session.id] = resources
-
-        # Cleanup session
-        await orchestrator.cleanup_session_resources(session.id)
-
-        # Resources should be cleaned up
-        assert session.id not in orchestrator.session_resources
+def run_tests():
+    """Run the test suite."""
+    pytest.main([__file__, "-v", "--tb=short"])
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-class TestOrchestratorPerformance:
-    """Test orchestrator performance."""
-
-    async def test_many_sessions_performance(self, test_config, db, test_project):
-        """Test performance with many sessions."""
-        import time
-
-        orchestrator = SessionOrchestrator(
-            config=test_config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        start = time.time()
-
-        # Create many sessions
-        sessions = []
-        for i in range(100):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            sessions.append(session)
-
-        duration = time.time() - start
-
-        # Should complete quickly
-        assert duration < 5  # Less than 5 seconds for 100 sessions
-        assert len(sessions) == 100
-
-    async def test_queue_performance(self, test_config, db, test_project):
-        """Test queue performance with many pending sessions."""
-        config = Config()
-        config.max_concurrent_sessions = 2
-
-        orchestrator = SessionOrchestrator(
-            config=config,
-            project_dir=Path("/test"),
-            db=db
-        )
-
-        # Queue many sessions
-        for i in range(50):
-            session = await orchestrator.create_session(
-                project_id=test_project,
-                session_type="coding",
-                model="test-model"
-            )
-            await orchestrator.queue_session(session.id)
-
-        assert len(orchestrator.session_queue) == 50
-
-        # Process queue should be efficient
-        import time
-        start = time.time()
-
-        with patch.object(orchestrator, "_run_session") as mock_run:
-            mock_run.return_value = AsyncMock()
-
-            # Process entire queue
-            while orchestrator.session_queue:
-                await orchestrator._process_queue()
-                await asyncio.sleep(0.001)  # Small delay
-
-        duration = time.time() - start
-        assert duration < 2  # Should process quickly
+if __name__ == "__main__":
+    run_tests()

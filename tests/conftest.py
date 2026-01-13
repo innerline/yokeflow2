@@ -22,9 +22,9 @@ from httpx import AsyncClient
 # Add parent directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.database import TaskDatabase
-from core.config import Config
-from core.observability import SessionLogger
+from server.database.operations import TaskDatabase
+from server.utils.config import Config
+from server.utils.observability import SessionLogger
 
 
 # Configure pytest-asyncio
@@ -60,7 +60,7 @@ async def db(test_config):
     Creates a connection to the test database and ensures proper cleanup
     after each test.
     """
-    from core.database_connection import DatabaseManager
+    from server.database.connection import DatabaseManager
 
     # Create database connection
     db_conn = DatabaseManager(test_config.database_url)
@@ -248,7 +248,7 @@ async def api_client(test_config):
     Provides an httpx AsyncClient configured to test the API.
     """
     # Import here to avoid circular dependencies
-    from api.main import app
+    from server.api.app import app
 
     async with AsyncClient(
         app=app,
@@ -310,7 +310,7 @@ def reset_singletons():
     Ensures clean state for each test.
     """
     # Reset any singleton instances
-    from core.database_connection import DatabaseManager
+    from server.database.connection import DatabaseManager
     if hasattr(DatabaseManager, '_instance'):
         delattr(DatabaseManager, '_instance')
 
@@ -386,4 +386,16 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "database: marks tests as database tests"
+    )
+    config.addinivalue_line(
+        "markers", "docker: marks tests as requiring Docker (deselect with '-m \"not docker\"')"
+    )
+    config.addinivalue_line(
+        "markers", "sandbox: marks tests as sandbox-related"
+    )
+    config.addinivalue_line(
+        "markers", "serial: marks tests that must run serially (not in parallel)"
+    )
+    config.addinivalue_line(
+        "markers", "performance: marks tests as performance tests"
     )

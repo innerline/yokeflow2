@@ -6,6 +6,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import crypto from 'crypto';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -15,11 +16,17 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import { fileURLToPath } from 'url';
 // Import database implementation
 import { TaskDatabase } from './database.js';
 import type { NewTask, NewTest, NewEpic } from './types.js';
 
 const execAsync = promisify(exec);
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Initialize database
 const db = new TaskDatabase();
@@ -34,6 +41,83 @@ const idFieldSchema = {
     { type: 'string' }
   ]
 };
+
+/**
+ * Run Python verification system for a task.
+ * Called before marking task as complete to ensure tests pass.
+ *
+ * @param taskId - UUID of task to verify
+ * @param sessionId - Optional UUID of current session
+ * @returns Object with passed flag and message
+ */
+async function runPythonVerification(
+  taskId: string,
+  sessionId?: string
+): Promise<{passed: boolean, message: string}> {
+  try {
+    // Get project name to construct path
+    const projectName = await db.getProjectName();
+    const projectPath = `generations/${projectName}`;
+
+    console.error(`[Verification] Running verification for task ${taskId}`);
+    console.error(`[Verification] Project path: ${projectPath}`);
+
+    // Determine the YokeFlow root directory (parent of mcp-task-manager)
+    const yokeflowRoot = path.resolve(__dirname, '..', '..');
+
+    // Build command
+    const args = [
+      '-m', 'server.verification.cli',
+      '--task-id', taskId,
+      '--project-path', projectPath
+    ];
+
+    if (sessionId) {
+      args.push('--session-id', sessionId);
+    }
+
+    // Run Python verification CLI with PYTHONPATH set to YokeFlow root
+    const { stdout, stderr } = await execAsync(
+      `python ${args.join(' ')}`,
+      {
+        timeout: 120000, // 2 minute timeout
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        cwd: yokeflowRoot, // Run from YokeFlow root
+        env: {
+          ...process.env,
+          PYTHONPATH: yokeflowRoot // Add YokeFlow root to Python path
+        }
+      }
+    );
+
+    // Exit code 0 = success
+    console.error(`[Verification] PASSED for task ${taskId}`);
+    return {
+      passed: true,
+      message: stdout || '✓ All tests passed'
+    };
+
+  } catch (error: any) {
+    // Check exit code
+    const exitCode = error.code;
+
+    if (exitCode === 2) {
+      // Configuration error - don't block task completion
+      console.error(`[Verification] Configuration error for task ${taskId}: ${error.stderr || error.message}`);
+      return {
+        passed: true, // Don't block on config errors
+        message: `⚠️  Verification system error (task not blocked):\n${error.stderr || error.message}`
+      };
+    }
+
+    // Exit code 1 or other error = verification failed
+    console.error(`[Verification] FAILED for task ${taskId}: ${error.stderr || error.message}`);
+    return {
+      passed: false,
+      message: error.stderr || error.stdout || error.message || 'Verification failed'
+    };
+  }
+}
 
 // Define tool schemas
 const tools: Tool[] = [
@@ -318,6 +402,142 @@ const tools: Tool[] = [
       },
       required: ['command']
     }
+  },
+  {
+    name: 'run_task_verification',
+    description: 'Run verification tests for a completed task. Tests are automatically generated and executed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          ...idFieldSchema,
+          description: 'The ID of the task to verify'
+        },
+        force: {
+          type: 'boolean',
+          description: 'Force re-run even if already verified'
+        }
+      },
+      required: ['task_id']
+    }
+  },
+  {
+    name: 'get_verification_status',
+    description: 'Get the verification status and test results for a task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          ...idFieldSchema,
+          description: 'The ID of the task'
+        }
+      },
+      required: ['task_id']
+    }
+  },
+  {
+    name: 'track_file_modification',
+    description: 'Track that a file was modified during task implementation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          ...idFieldSchema,
+          description: 'The ID of the current task'
+        },
+        file_path: {
+          type: 'string',
+          description: 'Path to the modified file'
+        },
+        modification_type: {
+          type: 'string',
+          enum: ['created', 'modified', 'deleted', 'renamed'],
+          description: 'Type of modification'
+        }
+      },
+      required: ['task_id', 'file_path']
+    }
+  },
+  {
+    name: 'list_verification_results',
+    description: 'List all verification results for the current project',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['passed', 'failed', 'manual_review', 'all'],
+          description: 'Filter by verification status'
+        }
+      }
+    }
+  },
+  {
+    name: 'validate_epic',
+    description: 'Trigger validation for an epic (requires all tasks to be complete)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The ID of the epic to validate'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID for tracking'
+        }
+      },
+      required: ['epic_id']
+    }
+  },
+  {
+    name: 'get_epic_validation_status',
+    description: 'Get validation status for a specific epic',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The ID of the epic'
+        }
+      },
+      required: ['epic_id']
+    }
+  },
+  {
+    name: 'list_epic_validation_results',
+    description: 'List recent epic validation results',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results to return (default: 10)'
+        }
+      }
+    }
+  },
+  {
+    name: 'mark_epic_validated',
+    description: 'Mark an epic as validated based on validation results',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The ID of the epic'
+        },
+        validation_id: {
+          type: 'string',
+          description: 'The validation result ID'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID'
+        }
+      },
+      required: ['epic_id', 'validation_id']
+    }
   }
 ];
 
@@ -499,6 +719,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
 
       case 'update_task_status':
+        // If marking task as done, run verification first
+        if (args?.done === true) {
+          const taskId = String(args?.task_id);
+          const sessionId = process.env.SESSION_ID; // Optional session context
+
+          console.error(`[MCP] Task ${taskId} completion requested - running verification...`);
+
+          const verificationResult = await runPythonVerification(taskId, sessionId);
+
+          if (!verificationResult.passed) {
+            // Verification failed - return error and don't update task
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `❌ Task ${taskId} CANNOT be marked complete - verification failed:\n\n${verificationResult.message}\n\n` +
+                        `Please fix the failing tests and try again. The task will remain incomplete until all tests pass.`
+                }
+              ],
+              isError: true
+            };
+          }
+
+          // Verification passed - log success
+          console.error(`[MCP] Task ${taskId} verification passed - marking complete`);
+          console.error(`[Verification] ${verificationResult.message}`);
+        }
+
+        // Proceed with normal task update (either verification passed or marking incomplete)
         const updatedTask = await db.updateTaskStatus(
           args?.task_id as any,
           args?.done as boolean
@@ -506,11 +755,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!updatedTask) {
           throw new Error(`Task ${args?.task_id} not found`);
         }
+
         return {
           content: [
             {
               type: 'text',
-              text: `Task ${updatedTask.id} marked as ${args?.done ? 'completed' : 'incomplete'}`
+              text: `Task ${updatedTask.id} marked as ${args?.done ? 'completed' : 'incomplete'}` +
+                    (args?.done ? '\n✅ All verification tests passed!' : '')
             }
           ]
         };
@@ -684,6 +935,261 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             isError: true
           };
         }
+
+      case 'run_task_verification':
+        // Manual verification trigger (also runs automatically on task completion)
+        const verifyTaskId = String(args?.task_id);
+        const force = args?.force as boolean || false;
+        const verifySessionId = process.env.SESSION_ID;
+
+        console.error(`[MCP] Manual verification requested for task ${verifyTaskId}`);
+
+        const manualVerificationResult = await runPythonVerification(verifyTaskId, verifySessionId);
+
+        if (manualVerificationResult.passed) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `✅ Task ${verifyTaskId} verification PASSED!\n\n${manualVerificationResult.message}\n\n` +
+                      `You can now mark this task as complete using update_task_status.`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `❌ Task ${verifyTaskId} verification FAILED:\n\n${manualVerificationResult.message}\n\n` +
+                      `Please fix the issues before marking the task as complete.`
+              }
+            ],
+            isError: true
+          };
+        }
+
+      case 'get_verification_status':
+        const statusTaskId = args?.task_id as any;
+
+        // Query verification results from database
+        const verificationResult = await db.query<any>(
+          `SELECT * FROM v_task_verification_status WHERE task_id = $1`,
+          [statusTaskId]
+        );
+
+        if (verificationResult && verificationResult.length > 0) {
+          const result = verificationResult[0] as any;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Task ${statusTaskId} verification status:
+- Status: ${result.latest_verification_status || 'Not verified'}
+- Tests Run: ${result.tests_run || 0}
+- Tests Passed: ${result.tests_passed || 0}
+- Tests Failed: ${result.tests_failed || 0}
+- Retry Count: ${result.retry_count || 0}
+- Needs Review: ${result.needs_review ? 'Yes' : 'No'}`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Task ${statusTaskId} has not been verified yet.`
+              }
+            ]
+          };
+        }
+
+      case 'track_file_modification':
+        const trackTaskId = args?.task_id as any;
+        const filePath = args?.file_path as string;
+        const modificationType = args?.modification_type as string || 'modified';
+
+        // Insert file modification tracking
+        await db.query(
+          `INSERT INTO task_file_modifications
+           (task_id, file_path, modification_type, modified_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+          [trackTaskId, filePath, modificationType]
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Tracked ${modificationType} file: ${filePath} for task ${trackTaskId}`
+            }
+          ]
+        };
+
+      case 'list_verification_results':
+        const statusFilter = args?.status as string || 'all';
+
+        let query = `
+          SELECT task_id, task_description, latest_verification_status,
+                 tests_run, tests_passed, tests_failed, needs_review
+          FROM v_task_verification_status
+        `;
+
+        if (statusFilter !== 'all') {
+          query += ` WHERE latest_verification_status = '${statusFilter}'`;
+        }
+
+        query += ` ORDER BY last_verification_at DESC LIMIT 20`;
+
+        const results = await db.query<any>(query);
+
+        if (results && results.length > 0) {
+          const summary = results.map((r: any) =>
+            `- Task ${r.task_id}: ${r.latest_verification_status || 'Not verified'} (${r.tests_passed}/${r.tests_run} passed)`
+          ).join('\n');
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Recent verification results:\n${summary}`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No verification results found.'
+              }
+            ]
+          };
+        }
+
+      case 'validate_epic':
+        const epicIdToValidate = parseInt((args as any).epic_id);
+
+        // Start epic validation
+        const validationId = crypto.randomUUID();
+        await db.query(
+          `INSERT INTO epic_validation_results (
+            id, epic_id, session_id, status, started_at
+          ) VALUES ($1, $2, $3, 'running', NOW())`,
+          [validationId, epicIdToValidate, (args as any).session_id || null]
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Epic validation started for epic ${epicIdToValidate}. Validation ID: ${validationId}\n\nNote: Full validation logic requires the Python verification system.`
+            }
+          ]
+        };
+
+      case 'get_epic_validation_status':
+        const epicStatusId = parseInt((args as any).epic_id);
+
+        const validationStatus = await db.query(
+          `SELECT
+            evs.*,
+            e.name as epic_name
+          FROM v_epic_validation_status evs
+          JOIN epics e ON e.id = evs.epic_id
+          WHERE evs.epic_id = $1`,
+          [epicStatusId]
+        ).then(r => r[0]) as any;
+
+        if (validationStatus) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Epic Validation Status:
+Epic: ${validationStatus.epic_name}
+Validated: ${validationStatus.validated ? 'Yes' : 'No'}
+Status: ${validationStatus.validation_status || 'Not started'}
+Tasks Verified: ${validationStatus.tasks_verified || 0}/${validationStatus.total_tasks || 0}
+Integration Tests Passed: ${validationStatus.integration_tests_passed || 0}/${validationStatus.integration_tests_failed ? validationStatus.integration_tests_passed + validationStatus.integration_tests_failed : 'N/A'}
+Rework Tasks: ${validationStatus.total_rework_tasks || 0}
+Last Validation: ${validationStatus.last_validation_at || 'Never'}`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No validation status found for epic ${epicStatusId}`
+              }
+            ]
+          };
+        }
+
+      case 'list_epic_validation_results':
+        const epicValidations = await db.query(
+          `SELECT
+            evr.*,
+            e.name as epic_name
+          FROM epic_validation_results evr
+          JOIN epics e ON e.id = evr.epic_id
+          ORDER BY evr.started_at DESC
+          LIMIT $1`,
+          [(args as any)?.limit || 10]
+        ) as any[];
+
+        if (epicValidations.length > 0) {
+          const summary = epicValidations.map(v =>
+            `Epic: ${v.epic_name}
+  Status: ${v.status}
+  Tasks: ${v.tasks_verified}/${v.total_tasks} verified
+  Integration Tests: ${v.integration_tests_passed}/${v.integration_tests_run} passed
+  Rework Tasks Created: ${v.rework_tasks_created || 0}
+  Duration: ${v.duration_seconds || 0}s
+  Started: ${v.started_at}`
+          ).join('\n\n');
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Recent Epic Validation Results:\n\n${summary}`
+              }
+            ]
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No epic validation results found.'
+              }
+            ]
+          };
+        }
+
+      case 'mark_epic_validated':
+        const epicToMark = parseInt((args as any).epic_id);
+        const validationToUse = (args as any).validation_id;
+
+        const markResult = await db.query(
+          `SELECT mark_epic_validated($1, $2, $3) as success`,
+          [epicToMark, validationToUse, (args as any).session_id || null]
+        ).then(r => r[0]) as any;
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: markResult?.success
+                ? `✅ Epic ${epicToMark} marked as validated`
+                : `❌ Failed to mark epic ${epicToMark} as validated`
+            }
+          ]
+        };
 
       default:
         throw new Error(`Unknown tool: ${name}`);

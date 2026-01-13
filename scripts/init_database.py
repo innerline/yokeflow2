@@ -22,7 +22,7 @@ import logging
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from core.database import TaskDatabase
+from server.database.operations import TaskDatabase
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

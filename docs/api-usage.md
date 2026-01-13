@@ -2,7 +2,7 @@
 
 YokeFlow provides a RESTful API for managing projects and sessions programmatically. The Web UI uses this API, and you can use it directly for automation or integration.
 
-**For detailed API documentation, see [api/README.md](../api/README.md)**
+**Version**: 2.0.0
 
 ---
 
@@ -15,7 +15,7 @@ YokeFlow provides a RESTful API for managing projects and sessions programmatica
 docker-compose up -d
 
 # Start API server
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn server.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Server runs at: http://localhost:8000
@@ -114,6 +114,13 @@ ws.onmessage = (event) => {
 
 ## API Endpoints Reference
 
+### Health & Status
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Basic health check |
+| `GET` | `/health/detailed` | Detailed component status ⭐ NEW v2.0 |
+
 ### Projects
 
 | Method | Endpoint | Description |
@@ -133,6 +140,24 @@ ws.onmessage = (event) => {
 | `POST` | `/api/projects/{id}/coding/stop` | Stop current session |
 | `GET` | `/api/projects/{id}/sessions` | List all sessions |
 | `GET` | `/api/projects/{id}/sessions/{sid}` | Get session details |
+| `GET` | `/api/sessions/{sid}/logs` | Get session logs ⭐ NEW v2.0 |
+| `POST` | `/api/sessions/{sid}/pause` | Pause active session ⭐ NEW v2.0 |
+| `POST` | `/api/sessions/{sid}/resume` | Resume paused session ⭐ NEW v2.0 |
+
+### Tasks & Epics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/tasks/{task_id}` | Get task details ⭐ NEW v2.0 |
+| `PATCH` | `/api/tasks/{task_id}` | Update task status ⭐ NEW v2.0 |
+| `GET` | `/api/epics/{epic_id}/progress` | Get epic progress ⭐ NEW v2.0 |
+
+### Quality & Verification
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/sessions/{sid}/quality-review` | Trigger quality review ⭐ NEW v2.0 |
+| `GET` | `/api/projects/{id}/quality-metrics` | Get quality metrics ⭐ NEW v2.0 |
 
 ### Real-Time
 
@@ -140,7 +165,9 @@ ws.onmessage = (event) => {
 |--------|----------|-------------|
 | `WS` | `/api/ws/{id}` | WebSocket for live updates |
 
-**See [api/README.md](../api/README.md#api-endpoints) for complete endpoint documentation with request/response examples**
+⭐ **v2.0 New Endpoints** - See sections below for usage examples
+
+**See interactive documentation at http://localhost:8000/docs for complete endpoint details**
 
 ---
 
@@ -414,12 +441,178 @@ curl http://localhost:8000/api/projects/PROJECT_ID
 
 ---
 
+## v2.0 New Endpoints
+
+### Session Management
+
+#### Get Session Logs
+
+Retrieve structured logs for a session with pagination and filtering:
+
+```bash
+# Get latest 100 log entries
+curl "http://localhost:8000/api/sessions/SESSION_ID/logs?offset=0&limit=100"
+
+# Filter by log level
+curl "http://localhost:8000/api/sessions/SESSION_ID/logs?level=error"
+```
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "timestamp": "2026-01-08T15:30:45Z",
+      "level": "info",
+      "message": "Task completed successfully",
+      "task_id": "123"
+    }
+  ],
+  "total": 1250,
+  "offset": 0,
+  "limit": 100
+}
+```
+
+#### Pause/Resume Sessions
+
+```bash
+# Pause an active session
+curl -X POST http://localhost:8000/api/sessions/SESSION_ID/pause
+
+# Resume a paused session
+curl -X POST http://localhost:8000/api/sessions/SESSION_ID/resume
+```
+
+Both return `204 No Content` on success.
+
+### Task & Epic Management
+
+#### Get Task Details
+
+```bash
+curl http://localhost:8000/api/tasks/42
+```
+
+**Response:**
+```json
+{
+  "id": 42,
+  "name": "Implement user authentication",
+  "status": "in_progress",
+  "description": "Add JWT-based authentication",
+  "epic_id": 5
+}
+```
+
+#### Update Task Status
+
+```bash
+curl -X PATCH http://localhost:8000/api/tasks/42 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "completed"}'
+```
+
+#### Get Epic Progress
+
+```bash
+curl http://localhost:8000/api/epics/5/progress
+```
+
+**Response:**
+```json
+{
+  "epic_id": 5,
+  "name": "User Management",
+  "total_tasks": 15,
+  "completed_tasks": 8,
+  "in_progress_tasks": 2,
+  "pending_tasks": 5,
+  "progress_percentage": 53.3,
+  "status": "in_progress"
+}
+```
+
+### Quality & Verification
+
+#### Trigger Quality Review
+
+```bash
+curl -X POST http://localhost:8000/api/sessions/SESSION_ID/quality-review \
+  -H "Content-Type: application/json" \
+  -d '{"review_type": "comprehensive"}'
+```
+
+**Response:**
+```json
+{
+  "id": "review-abc123",
+  "session_id": "SESSION_ID",
+  "review_type": "comprehensive",
+  "status": "pending"
+}
+```
+
+#### Get Quality Metrics
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/quality-metrics
+```
+
+**Response:**
+```json
+{
+  "project_id": "PROJECT_ID",
+  "code_quality_score": 8.5,
+  "test_coverage": 85.3,
+  "issues_found": 12,
+  "issues_resolved": 8,
+  "last_review": "2026-01-08T15:30:45Z"
+}
+```
+
+### Health Check
+
+#### Detailed Health Status
+
+Get component-level health information:
+
+```bash
+curl http://localhost:8000/health/detailed
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "database": {
+    "status": "healthy",
+    "pool_size": 10,
+    "active_connections": 2
+  },
+  "mcp_server": {
+    "status": "healthy",
+    "version": "1.0.0"
+  },
+  "disk": {
+    "status": "healthy",
+    "free_space_gb": 150.5
+  },
+  "sessions": {
+    "active": 2,
+    "paused": 1
+  }
+}
+```
+
+---
+
 ## Related Documentation
 
-- **[api/README.md](../api/README.md)** - Complete API reference for developers
 - **[authentication.md](authentication.md)** - Authentication system details
 - **[deployment-guide.md](deployment-guide.md)** - Production deployment
 - **[developer-guide.md](developer-guide.md)** - Platform architecture
+- **[verification-system.md](verification-system.md)** - Automatic verification system
 
 ---
 

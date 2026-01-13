@@ -67,6 +67,106 @@ cp .env.example .env
 # Edit .env with your Claude API token
 ```
 
+## Project Background
+
+YokeFlow evolved from [Anthropic's Autonomous Coding demo](https://github.com/anthropics/claude-quickstarts/tree/main/autonomous-coding), transforming it into an API-first platform with comprehensive features including:
+- TypeScript/React Web UI with real-time monitoring
+- REST API with 17+ endpoints
+- PostgreSQL database with async operations
+- Docker sandbox support for secure execution
+- Automated verification system with test generation
+- Production hardening (retry logic, checkpointing, intervention)
+
+While we've made significant improvements, there are still exciting opportunities to enhance the platform further.
+
+## Areas for Contribution
+
+### 1. Core Enhancements
+
+**High-Impact Areas:**
+- **Brownfield Support** - Extend YokeFlow to modify existing codebases (not just greenfield)
+- **Non-UI Applications** - Support for CLIs, APIs, libraries, and backend services
+- **Selective Browser Testing** - Limit browser verification to UI-related tasks only
+- **Authentication System** - Implement the planned per-user authentication (see TODO-FUTURE.md)
+
+### 2. Integration & Connectivity
+
+**Expand YokeFlow's ecosystem:**
+- **GitHub Integration** - Automatic repository creation, PR management, issue tracking
+- **Task Manager Integration** - Connect with Jira, Linear, GitHub Projects, etc.
+- **Spec Writer Companion** - AI-powered specification writing tool
+- **CI/CD Integration** - GitHub Actions, GitLab CI, Jenkins workflows
+
+### 3. User Interface Improvements
+
+The current UI prioritizes functionality over polish. See [UI-NOTES.md](UI-NOTES.md) for details:
+- Enhanced visual design and UX
+- Better progress visualization
+- Real-time session monitoring improvements
+- Mobile responsiveness
+- Dark mode support
+
+### 4. Intelligent Agent Behavior
+
+**Make the agent smarter:**
+- **Dynamic Model Selection** - Choose coding models based on task complexity
+- **Context-Aware Testing** - Smarter test generation based on task type
+- **Adaptive Verification** - Skip browser tests for non-UI features
+- **Cost Optimization** - Use cheaper models for simple tasks
+
+### 5. Project Management Features
+
+**Enhance project control:**
+- **Epic/Task/Test Editing** - Allow manual editing before coding sessions begin
+- **Final Project Review** - Comprehensive comparison between created app and specs
+- **Mid-Project Adjustments** - Support for spec changes during development
+- **Task Dependencies** - Better handling of task ordering and dependencies
+
+### 6. Prompt Engineering
+
+**For less technical contributors:**
+- Experiment with initialization prompts for better task generation
+- Optimize coding prompts for specific project types (e-commerce, SaaS, dashboards)
+- Test various project specifications to identify best practices
+- Document what types of specs work best with YokeFlow
+- Improve error recovery prompts
+
+### 7. Platform Compatibility
+
+**Broaden platform support:**
+- Windows environment testing and adjustments
+- Linux distribution testing
+- E2B sandbox integration (alternative to Docker)
+- Cloud deployment configurations (AWS, GCP, Azure)
+
+### 8. Performance & Scalability
+
+**Make YokeFlow faster and more efficient:**
+- Database query optimization
+- Parallel task execution
+- Caching strategies
+- Memory usage optimization
+- Session resumption improvements
+
+## Current Limitations & Known Issues
+
+Understanding current limitations helps identify contribution opportunities:
+
+### Core Limitations
+1. **Greenfield Projects Only** - Currently limited to creating new projects from scratch
+2. **Web Application Focus** - Primarily designed for UI-based web applications
+3. **Universal Browser Verification** - Verifies every feature with browser automation
+
+### Platform Compatibility
+- Developed and tested primarily on macOS
+- May require adjustments for Windows environments
+- Docker support helps with cross-platform consistency
+
+### Known Gaps (see YOKEFLOW_REFACTORING_PLAN.md)
+- Authentication not yet implemented (2 tests deferred)
+- Some integration tests require database setup
+- Documentation could always be improved
+
 ## How to Contribute
 
 ### Reporting Bugs
@@ -292,18 +392,28 @@ See [tests/README.md](tests/README.md) for testing details.
 ### User Documentation
 
 Update these files when changing user-facing features:
-- **README.md** - Main user guide
+- **README.md** - Main user guide with v2.0 features
 - **CLAUDE.md** - Quick reference for AI agents
-- **QUICKSTART.md** - Getting started guide
+- **QUICKSTART.md** - 5-minute getting started guide
+- **CHANGELOG.md** - Document all changes
 - **docs/** - Detailed documentation
 
 ### Developer Documentation
 
 Update these files when changing architecture/APIs:
 - **docs/developer-guide.md** - Technical architecture
+- **docs/api-usage.md** - Complete API endpoint reference (17+ endpoints)
+- **docs/verification-system.md** - Automated testing framework
+- **docs/input-validation.md** - Validation framework guide
 - **docs/mcp-usage.md** - MCP integration details
-- **api/README.md** - API documentation
 - **Code comments** - Inline documentation
+
+### Additional Resources
+
+- **[TODO-FUTURE.md](TODO-FUTURE.md)** - Detailed suggestions for future enhancements
+- **[YOKEFLOW_REFACTORING_PLAN.md](YOKEFLOW_REFACTORING_PLAN.md)** - Remaining P1/P2 work items
+- **[UI-NOTES.md](UI-NOTES.md)** - Specific UI improvement opportunities
+- **[docs/testing-guide.md](docs/testing-guide.md)** - Comprehensive testing guide
 
 ### Writing Style
 
@@ -336,8 +446,57 @@ Contributors will be:
 - Acknowledged in documentation
 - Invited to collaborate on future features
 
+## Experimentation & Forking
+
+We encourage community members to fork YokeFlow and experiment with bold ideas!
+
+### Why Fork?
+
+- **Rapid Prototyping** - Test ideas without waiting for PR review
+- **Experimental Features** - Try features that may not fit the main project
+- **Learning** - Understand the codebase by modifying it
+- **Innovation** - Discover new approaches to autonomous coding
+
+### Ideas for Forks
+
+1. **Specialized Agents**
+   - Create agents optimized for specific frameworks (React, Django, FastAPI)
+   - Build domain-specific agents (e-commerce, SaaS, data science)
+   - Experiment with different Claude models and configurations
+
+2. **Alternative Architectures**
+   - Try different database systems (MongoDB, SQLite)
+   - Implement alternative sandboxing (E2B, Firecracker)
+   - Experiment with different UI frameworks
+
+3. **Novel Features**
+   - Multi-agent collaboration
+   - Voice-based specification input
+   - Real-time code collaboration
+   - AI-powered code review
+
+### Sharing Your Fork
+
+If your fork proves successful:
+1. **Document your approach** in your fork's README
+2. **Share in GitHub Discussions** to inspire others
+3. **Consider upstreaming** if it fits YokeFlow's goals
+4. **Write blog posts** about your learnings
+
+### Guidelines for Experimentation
+
+- **Experiment Freely** - Don't be afraid to break things in your fork
+- **Document Findings** - Share what works and what doesn't
+- **Credit Original** - Acknowledge YokeFlow in your fork
+- **Share Knowledge** - Help the community learn from your experiments
+- **Test Thoroughly** - Ensure your changes work before sharing
+
 ---
 
 **Questions?** Open a discussion on GitHub or create an issue.
 
-**Thank you for contributing to YokeFlow!** 🚀
+**Ready to contribute or experiment? We're excited to see what you build!** 🚀
+
+---
+
+*Remember: YokeFlow is about pushing the boundaries of autonomous development. Your contributions and experiments help shape the future of AI-assisted coding.*

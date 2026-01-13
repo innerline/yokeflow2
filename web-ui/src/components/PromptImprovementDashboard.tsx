@@ -12,6 +12,8 @@ import type {
 } from '@/lib/types';
 import ConfirmDialog from './ConfirmDialog';
 import TriggerReviewsDialog from './TriggerReviewsDialog';
+import { ToastContainer, useToast } from './Toast';
+import { useProjectWebSocket } from '@/lib/websocket';
 
 export default function PromptImprovementDashboard() {
   const [analyses, setAnalyses] = useState<PromptAnalysisSummary[]>([]);
@@ -33,6 +35,41 @@ export default function PromptImprovementDashboard() {
   const [sandboxType, setSandboxType] = useState<'docker' | 'local'>('docker');
   const [lastNDays, setLastNDays] = useState(7);
   const [configuredMinReviews, setConfiguredMinReviews] = useState(5); // From config file
+
+  // Toast notifications
+  const { toasts, addToast, removeToast } = useToast();
+
+  // WebSocket connection for deep review notifications
+  useProjectWebSocket(selectedProjectId, {
+    onDeepReviewStarted: (sessionId: string, sessionNumber: number) => {
+      addToast({
+        type: 'info',
+        title: 'Deep Review Started',
+        message: `Running deep review for session ${sessionNumber}`,
+        duration: 3000,
+      });
+    },
+    onDeepReviewCompleted: (sessionId: string, sessionNumber: number) => {
+      addToast({
+        type: 'success',
+        title: 'Deep Review Complete',
+        message: `Session ${sessionNumber} review completed successfully`,
+        duration: 5000,
+      });
+      // Refresh project stats to show updated review count
+      if (selectedProjectId) {
+        loadProjectStats(selectedProjectId);
+      }
+    },
+    onDeepReviewFailed: (sessionId: string, sessionNumber: number, error: string) => {
+      addToast({
+        type: 'error',
+        title: 'Deep Review Failed',
+        message: `Session ${sessionNumber}: ${error}`,
+        duration: 7000,
+      });
+    },
+  });
 
   useEffect(() => {
     loadData();
@@ -179,7 +216,9 @@ export default function PromptImprovementDashboard() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <>
+      <ToastContainer messages={toasts} onClose={removeToast} />
+      <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Prompt Improvement System</h1>
@@ -400,12 +439,14 @@ export default function PromptImprovementDashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <a
-                      href={`/prompt-improvements/${analysis.id}`}
-                      className="px-4 py-2 text-sm bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
-                    >
-                      View Details →
-                    </a>
+                    {analysis.status === 'completed' && (
+                      <a
+                        href={`/prompt-improvements/${analysis.id}`}
+                        className="px-4 py-2 text-sm bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
+                      >
+                        View Details →
+                      </a>
+                    )}
                     <button
                       onClick={() => handleDeleteClick(analysis.id)}
                       className="px-3 py-2 text-sm bg-red-50 dark:bg-red-900 text-red-600 dark:text-red-300 rounded-md hover:bg-red-100 dark:hover:bg-red-800 transition-colors"
@@ -467,8 +508,10 @@ export default function PromptImprovementDashboard() {
           totalSessions={projectStats.total_sessions}
           sessionsWithoutReviews={projectStats.sessions_without_reviews}
           unreviewedSessionNumbers={projectStats.unreviewed_session_numbers}
+          reviewedSessionNumbers={projectStats.reviewed_session_numbers}
         />
       )}
     </div>
+    </>
   );
 }

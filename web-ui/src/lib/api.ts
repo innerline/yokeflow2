@@ -394,6 +394,16 @@ class ApiClient {
   }
 
   /**
+   * Get raw analysis report for debugging and manual review
+   */
+  async getRawAnalysisReport(analysisId: string): Promise<any> {
+    const response = await this.client.get<any>(
+      `/api/prompt-improvements/${analysisId}/raw-report`
+    );
+    return response.data;
+  }
+
+  /**
    * Update proposal status (accept, reject, etc.)
    */
   async updatePromptProposal(

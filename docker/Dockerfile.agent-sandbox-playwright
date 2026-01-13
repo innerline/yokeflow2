@@ -1,7 +1,7 @@
 # Dockerfile for YokeFlow Agent Sandbox with Playwright Support
 # Based on Playwright's official image with Node.js 20 LTS
 
-FROM mcr.microsoft.com/playwright:v1.41.0-focal
+FROM mcr.microsoft.com/playwright:v1.57.0-focal
 
 # Install Node.js 20 LTS (Playwright image comes with older Node)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \

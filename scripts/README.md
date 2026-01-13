@@ -138,6 +138,31 @@ python scripts/cleanup_containers.py --force      # Force remove ALL (including 
 
 ---
 
+### [docker-services-helper.sh](docker-services-helper.sh)
+Manage Docker services for generated projects.
+
+**Usage:**
+```bash
+./scripts/docker-services-helper.sh my-project start   # Start services
+./scripts/docker-services-helper.sh my-project stop    # Stop services
+./scripts/docker-services-helper.sh my-project status  # Check status
+./scripts/docker-services-helper.sh my-project ports   # Check port conflicts
+```
+
+**Features:**
+- Start/stop Docker Compose services in generated projects
+- Check for port conflicts before starting
+- View service status
+- Manage project-specific infrastructure
+
+**Use when:**
+- Generated projects include Docker Compose configurations
+- Starting databases or services for testing
+- Debugging port conflicts
+- Managing project infrastructure
+
+---
+
 ### [docker-watchdog.sh](docker-watchdog.sh)
 Monitors Docker daemon and auto-restarts if it crashes during long-running sessions.
 
@@ -301,6 +326,12 @@ python scripts/reset_project.py --project-dir my-project
 python scripts/show_review_recommendations.py
 ```
 
+**Manage project Docker services:**
+```bash
+./scripts/docker-services-helper.sh my-project start
+./scripts/docker-services-helper.sh my-project ports
+```
+
 ---
 
 ## Notes
@@ -316,6 +347,6 @@ python scripts/show_review_recommendations.py
 ## See Also
 
 - [Web UI](../web-ui/README.md) - Primary interface for project management
-- [API Documentation](../api/README.md) - REST API and WebSocket endpoints
+- [API Documentation](../docs/api-usage.md) - REST API and WebSocket endpoints
 - [Developer Guide](../docs/developer-guide.md) - Technical deep-dive
 - [CLAUDE.md](../CLAUDE.md) - Quick reference for the entire platform

@@ -16,15 +16,15 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.security import (
+from server.utils.security import (
     bash_security_hook,
     extract_commands,
     validate_chmod_command
 )
 
 
-def test_hook(command: str, should_block: bool) -> bool:
-    """Test a single command against the security hook."""
+def _test_hook_helper(command: str, should_block: bool) -> bool:
+    """Test a single command against the security hook (helper function)."""
     input_data = {"tool_name": "Bash", "tool_input": {"command": command}}
     result = asyncio.run(bash_security_hook(input_data))
     was_blocked = result.get("decision") == "block"
@@ -49,8 +49,6 @@ def test_hook(command: str, should_block: bool) -> bool:
 def test_extract_commands():
     """Test the command extraction logic."""
     print("\nTesting command extraction:\n")
-    passed = 0
-    failed = 0
 
     test_cases = [
         ("ls -la", ["ls"]),
@@ -63,22 +61,13 @@ def test_extract_commands():
 
     for cmd, expected in test_cases:
         result = extract_commands(cmd)
-        if result == expected:
-            print(f"  PASS: {cmd!r} -> {result}")
-            passed += 1
-        else:
-            print(f"  FAIL: {cmd!r}")
-            print(f"         Expected: {expected}, Got: {result}")
-            failed += 1
-
-    return passed, failed
+        assert result == expected, f"Command {cmd!r}: Expected {expected}, Got {result}"
+        print(f"  PASS: {cmd!r} -> {result}")
 
 
 def test_validate_chmod():
     """Test chmod command validation."""
     print("\nTesting chmod validation:\n")
-    passed = 0
-    failed = 0
 
     # Test cases: (command, should_be_allowed, description)
     test_cases = [
@@ -103,19 +92,10 @@ def test_validate_chmod():
 
     for cmd, should_allow, description in test_cases:
         allowed, reason = validate_chmod_command(cmd)
-        if allowed == should_allow:
-            print(f"  PASS: {cmd!r} ({description})")
-            passed += 1
-        else:
-            expected = "allowed" if should_allow else "blocked"
-            actual = "allowed" if allowed else "blocked"
-            print(f"  FAIL: {cmd!r} ({description})")
-            print(f"         Expected: {expected}, Got: {actual}")
-            if reason:
-                print(f"         Reason: {reason}")
-            failed += 1
-
-    return passed, failed
+        expected = "allowed" if should_allow else "blocked"
+        actual = "allowed" if allowed else "blocked"
+        assert allowed == should_allow, f"{cmd!r} ({description}): Expected {expected}, Got {actual}. Reason: {reason}"
+        print(f"  PASS: {cmd!r} ({description})")
 
 
 def main():
@@ -127,14 +107,22 @@ def main():
     failed = 0
 
     # Test command extraction
-    ext_passed, ext_failed = test_extract_commands()
-    passed += ext_passed
-    failed += ext_failed
+    try:
+        test_extract_commands()
+        # Count test cases that passed
+        passed += 6  # Number of test cases in test_extract_commands
+    except AssertionError as e:
+        print(f"FAILED: {e}")
+        failed += 1
 
     # Test chmod validation
-    chmod_passed, chmod_failed = test_validate_chmod()
-    passed += chmod_passed
-    failed += chmod_failed
+    try:
+        test_validate_chmod()
+        # Count test cases that passed
+        passed += 15  # Number of test cases in test_validate_chmod
+    except AssertionError as e:
+        print(f"FAILED: {e}")
+        failed += 1
 
     # Commands that SHOULD be blocked
     print("\nCommands that should be BLOCKED:\n")
@@ -165,7 +153,7 @@ def main():
     ]
 
     for cmd in dangerous:
-        if test_hook(cmd, should_block=True):
+        if _test_hook_helper(cmd, should_block=True):
             passed += 1
         else:
             failed += 1
@@ -238,7 +226,7 @@ def main():
     ]
 
     for cmd in safe:
-        if test_hook(cmd, should_block=False):
+        if _test_hook_helper(cmd, should_block=False):
             passed += 1
         else:
             failed += 1

@@ -36,26 +36,26 @@ This guide provides technical details for developers who want to understand, cus
          ▼
 ┌─────────────────────┐
 │   FastAPI Server    │  Python (port 8000)
-│   api/main.py       │
+│ server/api/app.py   │
 └────────┬────────────┘
          │
          ▼
-┌─────────────────────┐
-│  orchestrator.py    │  Session lifecycle management
-└────────┬────────────┘
+┌─────────────────────────────┐
+│  server/agent/orchestrator  │  Session lifecycle
+└────────┬────────────────────┘
          │
          ▼
-┌─────────────────────┐
-│     agent.py        │  Agent loop, session management
-└────────┬────────────┘
+┌─────────────────────────────┐
+│  server/agent/agent.py      │  Agent loop
+└────────┬────────────────────┘
          │
-         ├──────────────────┐
-         │                  │
-         ▼                  ▼
-┌──────────────┐   ┌────────────────┐
-│  client.py   │   │  prompts.py    │
-│ (SDK setup)  │   │ (load prompts) │
-└──────┬───────┘   └────────────────┘
+         ├──────────────────────────┐
+         │                          │
+         ▼                          ▼
+┌────────────────────┐   ┌─────────────────────┐
+│ server/client/     │   │ server/client/      │
+│   claude.py        │   │   prompts.py        │
+└──────┬─────────────┘   └─────────────────────┘
        │
        ▼
 ┌─────────────────────────────────┐
@@ -124,8 +124,50 @@ Agent loop:
 
 ## Core Components
 
+### server/ Directory Structure
 
-### core/agent.py
+YokeFlow v2.0 uses a clean modular structure under `server/`:
+
+```
+server/
+├── agent/              # Session orchestration & lifecycle
+│   ├── agent.py        # Agent loop and session logic
+│   ├── orchestrator.py # Session lifecycle management
+│   ├── session_manager.py # Intervention system
+│   ├── checkpoint.py   # Session checkpointing
+│   ├── intervention.py # Blocker detection
+│   └── models.py       # Data models
+├── api/                # REST API & WebSocket
+│   ├── app.py          # Main FastAPI application
+│   ├── auth.py         # Authentication
+│   └── routes/         # API route modules
+├── client/             # External service clients
+│   ├── claude.py       # Claude SDK client
+│   ├── playwright.py   # Browser automation
+│   └── prompts.py      # Prompt loading
+├── database/           # Database layer
+│   ├── operations.py   # PostgreSQL operations
+│   ├── connection.py   # Connection pooling
+│   └── retry.py        # Retry logic
+├── quality/            # Quality & review system
+│   ├── metrics.py      # Quality metrics
+│   ├── reviews.py      # Deep reviews
+│   └── integration.py  # Quality integration
+├── verification/       # Testing & validation
+│   ├── task_verifier.py  # Task verification
+│   ├── epic_validator.py # Epic validation
+│   └── test_generator.py # Test generation
+├── sandbox/            # Docker management
+│   ├── manager.py      # Sandbox management
+│   └── hooks.py        # Sandbox hooks
+└── utils/              # Shared utilities
+    ├── config.py       # Configuration
+    ├── logging.py      # Structured logging
+    ├── errors.py       # Error hierarchy
+    └── security.py     # Security validation
+```
+
+### server/agent/agent.py
 
 **Purpose:** Core agent session logic
 
@@ -164,7 +206,7 @@ else:
     # Auto-continue with delay
 ```
 
-### core/client.py
+### server/client/claude.py
 
 **Purpose:** Claude SDK client configuration
 
@@ -192,7 +234,7 @@ mcp_servers = {
 }
 ```
 
-### core/prompts.py
+### server/client/prompts.py
 
 **Purpose:** Prompt loading and project setup
 
@@ -204,7 +246,7 @@ mcp_servers = {
 
 `copy_spec_to_project()` - Copy app_spec.txt to project
 
-### core/security.py
+### server/utils/security.py
 
 **Purpose:** Bash command blocklist validation
 
@@ -230,7 +272,7 @@ def validate_bash_command(command: str) -> tuple[bool, str]:
     # Return True/False + explanation
 ```
 
-### core/observability.py
+### server/utils/observability.py
 
 **Purpose:** Session logging and output filtering
 
@@ -256,7 +298,7 @@ generations/[project]/logs/
 Note: Session metrics stored in PostgreSQL (sessions.metrics JSONB field)
 ```
 
-### core/progress.py
+### server/utils/progress.py
 
 **Purpose:** Progress tracking utilities
 
@@ -270,7 +312,7 @@ Note: Session metrics stored in PostgreSQL (sessions.metrics JSONB field)
 - Terminal output of current progress
 - Called between sessions
 
-### core/database.py
+### server/database/operations.py
 
 **Purpose:** PostgreSQL database abstraction layer with async operations
 
@@ -300,7 +342,7 @@ async with DatabaseManager() as db:
     await db.update_task_status(task_id=5, done=True)
 ```
 
-### core/orchestrator.py
+### server/agent/orchestrator.py
 
 **Purpose:** Agent orchestration service for API-driven control
 
@@ -988,6 +1030,104 @@ psql $DATABASE_URL -c "SELECT id, name, created_at FROM projects;"
 # Use reset_project.py script
 python reset_project.py --project-dir my_project --yes
 ```
+
+---
+
+## Verification System (v2.0)
+
+YokeFlow includes an automatic verification system that ensures task quality before marking them complete.
+
+### Overview
+
+The verification system (`server/verification/`) provides:
+- **Automatic test generation** for completed tasks
+- **Task verification** with retry logic (max 3 attempts)
+- **Epic validation** across multiple tasks
+- **Failure analysis** with suggested fixes
+
+### Components
+
+**server/verification/task_verifier.py** (580 lines)
+- Verifies individual tasks before completion
+- Generates and runs tests automatically
+- Retry logic with failure analysis
+- Integration with MCP tool interception
+
+**server/verification/test_generator.py** (480 lines)
+- Auto-generates tests based on task description
+- Supports: unit, integration, E2E, browser, API tests
+- Context-aware test creation using Claude SDK
+
+**server/verification/epic_validator.py** (700 lines)
+- Validates entire epics after all tasks complete
+- Integration testing across task boundaries
+- Creates rework tasks for failures
+- Max 3 rework iterations
+
+**server/verification/integration.py** (413 lines)
+- Intercepts MCP `update_task_status` calls
+- Runs verification before allowing completion
+- Tracks file modifications per task
+- Configuration-driven enable/disable
+
+### How It Works
+
+```python
+# When agent tries to mark task complete
+MCP call: update_task_status(task_id=42, done=True)
+    ↓
+Interception by verification system
+    ↓
+Generate tests for task (test_generator.py)
+    ↓
+Run tests (task_verifier.py)
+    ↓
+If pass → Allow task completion
+If fail → Block completion, analyze failure, retry (max 3x)
+    ↓
+After all tasks in epic complete → Epic validation
+```
+
+### Configuration
+
+Enable/disable in `.yokeflow.yaml`:
+
+```yaml
+verification:
+  enabled: true                    # Enable task verification
+  auto_retry: true                  # Auto-retry failed tests
+  max_retries: 3                    # Max retry attempts
+  test_timeout: 30                  # Timeout per test (seconds)
+  generate_unit_tests: true         # Generate unit tests
+  generate_api_tests: true          # Generate API tests
+  generate_browser_tests: true      # Generate browser tests
+  track_file_modifications: true    # Track files modified
+```
+
+### Database Tables
+
+Verification results are persisted in PostgreSQL:
+
+- `task_verifications` - Verification attempts and results
+- `epic_validations` - Epic-level validation results
+- `generated_tests` - Catalog of auto-generated tests
+- `verification_history` - Audit trail
+
+See `schema/postgresql/016_verification_system.sql` for complete schema.
+
+### Testing
+
+55 comprehensive tests cover the verification system:
+- `test_task_verifier.py` (11 tests)
+- `test_epic_validator.py` (13 tests)
+- `test_test_generator.py` (15 tests)
+- `test_verification_simple.py` (16 tests)
+
+### Related Documentation
+
+- [verification-system.md](verification-system.md) - User guide for verification features
+- [configuration.md](configuration.md) - Configuration options
+- [testing-guide.md](testing-guide.md) - Test suite documentation
 
 ---
 

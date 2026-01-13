@@ -11,6 +11,7 @@ interface Props {
   totalSessions: number;
   sessionsWithoutReviews: number;
   unreviewedSessionNumbers: number[];
+  reviewedSessionNumbers?: number[];
 }
 
 export default function TriggerReviewsDialog({
@@ -21,10 +22,12 @@ export default function TriggerReviewsDialog({
   totalSessions,
   sessionsWithoutReviews,
   unreviewedSessionNumbers,
+  reviewedSessionNumbers = [],
 }: Props) {
-  const [mode, setMode] = useState<'all' | 'unreviewed' | 'last_n' | 'single'>('unreviewed');
+  const [mode, setMode] = useState<'all' | 'unreviewed' | 'last_n' | 'single' | 're_review'>('unreviewed');
   const [lastN, setLastN] = useState(5);
   const [sessionNumber, setSessionNumber] = useState(unreviewedSessionNumbers[0] || 1);
+  const [reReviewSessionNumber, setReReviewSessionNumber] = useState(reviewedSessionNumbers[0] || 1);
   const [triggering, setTriggering] = useState(false);
 
   if (!isOpen) return null;
@@ -33,9 +36,10 @@ export default function TriggerReviewsDialog({
     try {
       setTriggering(true);
       const request: TriggerBulkReviewsRequest = {
-        mode,
+        mode: mode === 're_review' ? 'single' : mode,
         ...(mode === 'last_n' && { last_n: lastN }),
         ...(mode === 'single' && { session_number: sessionNumber }),
+        ...(mode === 're_review' && { session_number: reReviewSessionNumber }),
       };
       await onTrigger(request);
       onClose();
@@ -51,6 +55,7 @@ export default function TriggerReviewsDialog({
     if (mode === 'unreviewed') return sessionsWithoutReviews;
     if (mode === 'last_n') return Math.min(lastN, totalSessions);
     if (mode === 'single') return 1;
+    if (mode === 're_review') return 1;
     return 0;
   };
 
@@ -129,6 +134,38 @@ export default function TriggerReviewsDialog({
                     className="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   >
                     {unreviewedSessionNumbers.map(num => (
+                      <option key={num} value={num}>
+                        Session {num}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </label>
+          </div>
+
+          <div>
+            <label className="flex items-center space-x-3 cursor-pointer">
+              <input
+                type="radio"
+                value="re_review"
+                checked={mode === 're_review'}
+                onChange={(e) => setMode(e.target.value as any)}
+                className="w-4 h-4 text-blue-600"
+                disabled={reviewedSessionNumbers.length === 0}
+              />
+              <div className="flex-1">
+                <div className="font-medium">Re-Review Specific Sessions</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  {reviewedSessionNumbers.length === 0 ? 'No reviewed sessions' : 'Select a reviewed session to re-review'}
+                </div>
+                {mode === 're_review' && reviewedSessionNumbers.length > 0 && (
+                  <select
+                    value={reReviewSessionNumber}
+                    onChange={(e) => setReReviewSessionNumber(parseInt(e.target.value))}
+                    className="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  >
+                    {reviewedSessionNumbers.map(num => (
                       <option key={num} value={num}>
                         Session {num}
                       </option>

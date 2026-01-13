@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4, UUID
 from datetime import datetime
 
-from core.checkpoint import (
+from server.agent.checkpoint import (
     CheckpointManager,
     CheckpointRecoveryManager,
     get_resumable_sessions,
@@ -40,7 +40,7 @@ class TestCheckpointManager:
             {"role": "assistant", "content": "Hi there"}
         ]
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -83,7 +83,7 @@ class TestCheckpointManager:
         in_progress_tasks = [4]
         files_modified = ["src/app.py", "tests/test_app.py"]
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -131,7 +131,7 @@ class TestCheckpointManager:
             "checkpoint_type": "task_completion"
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -156,7 +156,7 @@ class TestCheckpointManager:
             "invalidated": False
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -174,7 +174,7 @@ class TestCheckpointManager:
 
         manager = CheckpointManager(session_id, project_id)
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -200,7 +200,7 @@ class TestCheckpointRecoveryManager:
         checkpoint_id = str(uuid4())
         new_session_id = str(uuid4())
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -228,7 +228,7 @@ class TestCheckpointRecoveryManager:
 
         recovery_id = str(uuid4())
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -253,7 +253,7 @@ class TestCheckpointRecoveryManager:
 
         recovery_id = str(uuid4())
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -306,7 +306,7 @@ class TestCheckpointRecoveryManager:
             "invalidated": False
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -331,7 +331,7 @@ class TestCheckpointRecoveryManager:
 
         checkpoint_id = str(uuid4())
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -353,7 +353,7 @@ class TestCheckpointRecoveryManager:
             "invalidation_reason": "State diverged"
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -375,7 +375,7 @@ class TestCheckpointRecoveryManager:
             "can_resume_from": False
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -403,7 +403,7 @@ class TestCheckpointRecoveryManager:
             "completed_tasks": [1, 2, 3]
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -436,7 +436,7 @@ class TestCheckpointRecoveryManager:
             "completed_tasks": [1, 2]
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -471,7 +471,7 @@ class TestCheckpointRecoveryManager:
             "completed_tasks": []
         }
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -541,7 +541,7 @@ class TestUtilityFunctions:
             {"session_id": uuid4(), "checkpoint_id": uuid4()}
         ]
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -562,7 +562,7 @@ class TestUtilityFunctions:
             {"recovery_id": uuid4(), "status": "failed"}
         ]
 
-        with patch('core.checkpoint.DatabaseManager') as MockDB:
+        with patch('server.agent.checkpoint.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 

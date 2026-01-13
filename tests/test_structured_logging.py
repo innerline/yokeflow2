@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from core.structured_logging import (
+from server.utils.logging import (
     StructuredLogFormatter,
     DevelopmentFormatter,
     PerformanceLogger,

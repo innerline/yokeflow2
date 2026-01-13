@@ -17,10 +17,10 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.intervention import InterventionManager, RetryTracker, BlockerDetector
-from core.session_manager import PausedSessionManager, AutoRecoveryManager
-from core.notifications import MultiChannelNotificationService, NotificationPreferencesManager
-from core.database_connection import DatabaseManager
+from server.agent.intervention import InterventionManager, RetryTracker, BlockerDetector
+from server.agent.session_manager import PausedSessionManager, AutoRecoveryManager
+from server.utils.notifications import MultiChannelNotificationService, NotificationPreferencesManager
+from server.database.connection import DatabaseManager
 
 
 async def test_retry_tracker():

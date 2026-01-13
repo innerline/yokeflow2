@@ -66,6 +66,49 @@ review:
   # Higher values (10-15) provide more robust patterns but require more sessions
   min_reviews_for_analysis: 5  # Default: 5 (recommended balance)
 
+# Intervention Configuration
+# ---------------------------
+# Prevent infinite loops and detect blockers
+intervention:
+  # Enable the intervention system
+  enabled: false  # Default: false (opt-in for production monitoring)
+
+  # Maximum retry attempts before blocking (default: 3)
+  max_retries: 3
+
+  # Error rate threshold - pause if error rate exceeds this (default: 0.15 = 15%)
+  # error_rate_threshold: 0.15
+
+  # Session duration limit - pause after this many seconds on same task (default: 600 = 10 min)
+  # session_duration_limit: 600
+
+  # Detect infrastructure errors like Prisma, Redis, Database issues (default: true)
+  # detect_infrastructure_errors: true
+
+# Verification Configuration
+# ---------------------------
+# Automated test generation and validation
+verification:
+  # Core settings
+  enabled: true                       # Enable/disable verification system
+  auto_retry: true                    # Automatically retry failed tests
+  max_retries: 3                      # Maximum retry attempts
+  test_timeout: 30                    # Test timeout in seconds
+  require_all_tests_pass: true        # All tests must pass
+  min_test_coverage: 0.8              # Minimum coverage (0.0-1.0)
+
+  # Test generation settings
+  generate_unit_tests: true           # Generate unit tests
+  generate_api_tests: true            # Generate API tests
+  generate_browser_tests: true        # Generate browser tests (for UI projects)
+  generate_integration_tests: false   # Generate integration tests (more complex)
+
+  # File tracking
+  track_file_modifications: true      # Monitor file changes during task execution
+
+  # Webhook for external notifications (optional)
+  # webhook_url: https://your-domain.com/webhooks/verification
+
 # Sandbox Configuration
 # ----------------------
 # Isolated execution environments for agent sessions

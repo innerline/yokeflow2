@@ -7,7 +7,7 @@ Tests error creation, categorization, recoverability, and error context.
 import pytest
 from uuid import uuid4
 
-from core.errors import (
+from server.utils.errors import (
     ErrorCategory,
     YokeFlowError,
     DatabaseError,

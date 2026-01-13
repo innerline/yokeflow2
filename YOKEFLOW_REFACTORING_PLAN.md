@@ -1,611 +1,497 @@
-# YokeFlow Refactoring Plan
+# YokeFlow Future Development Roadmap
+
 *Created: January 4, 2026*
-*Updated: January 2026*
+*Updated: January 12, 2026 - Quality & Intervention System Improvements Complete*
 
 ## Executive Summary
 
-Based on comprehensive analysis of YokeFlow's current state, the FlowForge attempt, and app_spec.txt requirements, this plan outlines a pragmatic, incremental refactoring approach. The goal is to enhance YokeFlow's reliability, testing capabilities, and developer experience while maintaining its proven architecture.
-
-**Key Finding**: YokeFlow is now 100% production-ready (P0 complete) but has remaining P1/P2 improvements to enhance confidence, robustness, and operations.
-
-## ✅ Completed Improvements (36 hours)
-
-### P0 Critical - All Complete
-- ✅ **Database Retry Logic** (4h) - Exponential backoff with jitter
-- ✅ **Intervention System** (6h) - Full pause/resume capability
-- ✅ **Session Checkpointing** (8h) - Complete state preservation
-
-### P1/P2 Partial
-- ✅ **Structured Logging** (10h) - JSON + dev formatters, context tracking
-- ✅ **Error Hierarchy** (8h) - 30+ error types with categorization
-
-## 🚧 Remaining Improvements (59-69 hours)
-
-### P1 High Priority (34-42 hours)
-1. **Test Suite Expansion** (20-30h) - Achieve 70% coverage
-   - Currently 15-20% coverage
-   - Need API, database, session lifecycle tests
-   - See [tests/README.md](tests/README.md) for detailed plan
-
-2. **Input Validation Framework** (8-10h)
-   - Pydantic models for all inputs
-   - Spec file format validation
-   - Configuration validation
-   - API request/response validation
-
-3. **Health Check Endpoints** (6-8h)
-   - Database connectivity checks
-   - MCP server status
-   - Docker container health
-   - Resource availability
-
-### P2 Medium Priority (18-22 hours)
-1. **Resource Management** (10-12h)
-   - Connection pooling optimization
-   - Concurrent session limits
-   - Memory usage monitoring
-   - Docker resource constraints
-
-2. **Performance Monitoring** (8-10h)
-   - Operation timing metrics
-   - Token usage tracking
-   - Database query performance
-   - Session completion times
-
-## Current State Assessment
-
-### YokeFlow Strengths
-- **Excellent Architecture** (9/10): Clean separation, async-first design
-- **Strong Database Layer** (9/10): PostgreSQL with proper abstractions
-- **Good Security** (9/10): Blocklist approach, signal handling
-- **Comprehensive Observability**: Dual logging (JSONL + TXT)
-- **4-Phase Review System**: Already implemented but underutilized
-
-### Critical Gaps
-1. **Testing Coverage**: Only 5-10% (need 70%+)
-2. **Task Verification**: No automated testing after each task
-3. **Epic Validation**: No loop-back mechanism for failed epics
-4. **Session Recovery**: Cannot resume from failures
-5. **Quality Gates**: Reviews exist but don't trigger re-work
-
-### FlowForge's Valuable Contributions
-- Fastify + tRPC architecture (better performance)
-- BullMQ task queuing system
-- Parallel agent execution design
-- Template marketplace concept
-- Cost tracking implementation
-
-## Refactoring Strategy
-
-### Core Principle: "Test-Driven Task Completion"
-
-Every task must pass automated tests before being marked complete. Failed tests trigger automatic re-attempts with context from failures.
-
-### Phase 1: Enhanced Testing Framework (Week 1-2)
-
-#### 1.1 Automated Test Generation
-```python
-# core/test_generator.py
-class TestGenerator:
-    """Generate tests for each completed task"""
-
-    async def generate_tests_for_task(self, task_id: str):
-        """
-        1. Analyze task requirements
-        2. Generate unit tests for new functions
-        3. Generate integration tests for APIs
-        4. Generate E2E tests for UI changes
-        """
-
-    async def run_tests(self, task_id: str) -> TestResults:
-        """Execute all tests and return detailed results"""
-
-    async def analyze_failures(self, results: TestResults) -> FailureAnalysis:
-        """Provide context about what failed and why"""
-```
-
-#### 1.2 Task Verification Loop
-```python
-# core/task_verifier.py
-class TaskVerifier:
-    """Verify task completion with tests"""
-
-    async def verify_task(self, task_id: str, max_attempts: int = 3):
-        for attempt in range(max_attempts):
-            # Generate tests if not exist
-            tests = await self.test_generator.generate_tests_for_task(task_id)
-
-            # Run tests
-            results = await self.test_runner.run(tests)
-
-            if results.passed:
-                await self.mark_task_verified(task_id)
-                return True
-
-            # Analyze failures
-            analysis = await self.failure_analyzer.analyze(results)
-
-            # Create fix task
-            fix_task = await self.create_fix_task(task_id, analysis)
-
-            # Execute fix
-            await self.agent.execute_task(fix_task)
-
-        # Mark for manual review if still failing
-        await self.mark_needs_review(task_id)
-```
-
-#### 1.3 Integration Points
-- Add to `core/agent.py` after task completion
-- Update `core/orchestrator.py` to include verification step
-- Extend MCP tools with test commands
-
-### Phase 2: Epic Validation System (Week 2-3)
-
-#### 2.1 Epic Test Suite
-```python
-# core/epic_validator.py
-class EpicValidator:
-    """Validate entire epic completion"""
-
-    async def validate_epic(self, epic_id: str):
-        """
-        1. Run all task tests
-        2. Run integration tests across tasks
-        3. Verify epic acceptance criteria
-        4. Generate epic test report
-        """
-
-    async def handle_epic_failure(self, epic_id: str, failures: List[Failure]):
-        """
-        1. Analyze which tasks contributed to failure
-        2. Create remediation tasks
-        3. Re-run failed portions
-        4. Update epic status
-        """
-```
-
-#### 2.2 Epic Loop-Back Mechanism
-```python
-# core/epic_manager.py
-class EnhancedEpicManager:
-    """Manage epic execution with validation loops"""
-
-    async def execute_epic(self, epic_id: str):
-        max_iterations = 3
-
-        for iteration in range(max_iterations):
-            # Execute all tasks
-            await self.execute_epic_tasks(epic_id)
-
-            # Validate epic
-            validation = await self.epic_validator.validate_epic(epic_id)
-
-            if validation.passed:
-                await self.mark_epic_complete(epic_id)
-                return
-
-            # Create fix iteration
-            await self.create_fix_iteration(epic_id, validation.failures)
-
-        # Escalate if still failing
-        await self.escalate_epic(epic_id)
-```
-
-### Phase 3: Session Recovery & Checkpointing (Week 3-4)
-
-#### 3.1 Session Checkpointing
-```python
-# core/checkpoint_manager.py
-class CheckpointManager:
-    """Manage session checkpoints for recovery"""
-
-    async def create_checkpoint(self, session_id: str):
-        """Save current state after each task"""
-        checkpoint = {
-            'session_id': session_id,
-            'completed_tasks': await self.get_completed_tasks(session_id),
-            'current_task': await self.get_current_task(session_id),
-            'context': await self.get_session_context(session_id),
-            'timestamp': datetime.utcnow()
-        }
-        await self.save_checkpoint(checkpoint)
-
-    async def restore_from_checkpoint(self, session_id: str):
-        """Resume session from last checkpoint"""
-        checkpoint = await self.get_latest_checkpoint(session_id)
-        await self.restore_context(checkpoint['context'])
-        return checkpoint['current_task']
-```
-
-#### 3.2 Failure Recovery
-```python
-# core/recovery_manager.py
-class RecoveryManager:
-    """Handle session failures and recovery"""
-
-    async def handle_session_failure(self, session_id: str, error: Exception):
-        # Log failure details
-        await self.log_failure(session_id, error)
-
-        # Create recovery plan
-        plan = await self.create_recovery_plan(session_id, error)
-
-        # Schedule retry with context
-        await self.schedule_retry(session_id, plan)
-```
-
-### Phase 4: Quality Gates & Reviews (Week 4-5)
-
-#### 4.1 Enhanced Review Integration
-```python
-# core/quality_gates.py
-class QualityGates:
-    """Enforce quality standards at each phase"""
-
-    async def task_gate(self, task_id: str) -> GateResult:
-        """Quality gate for individual tasks"""
-        # Run tests
-        test_results = await self.run_task_tests(task_id)
-
-        # Check code quality
-        quality_results = await self.check_code_quality(task_id)
-
-        # Run security scan
-        security_results = await self.run_security_scan(task_id)
-
-        return self.evaluate_gate(test_results, quality_results, security_results)
-
-    async def epic_gate(self, epic_id: str) -> GateResult:
-        """Quality gate for entire epic"""
-        # Aggregate task gates
-        # Run integration tests
-        # Check acceptance criteria
-
-    async def session_gate(self, session_id: str) -> GateResult:
-        """Quality gate for session completion"""
-        # Run deep review
-        # Check all epics
-        # Validate project goals
-```
-
-#### 4.2 Review-Triggered Actions
-```python
-# core/review_actions.py
-class ReviewActionHandler:
-    """Handle actions based on review results"""
-
-    async def process_review(self, review: DeepReview):
-        if review.has_critical_issues():
-            # Create fix tasks
-            fix_tasks = await self.create_fix_tasks(review.critical_issues)
-
-            # Schedule immediate fix session
-            await self.schedule_fix_session(fix_tasks)
-
-        if review.has_suggestions():
-            # Create improvement tasks
-            await self.create_improvement_tasks(review.suggestions)
-```
-
-### Phase 5: Parallel Execution & Performance (Week 5-6)
-
-#### 5.1 Import Useful FlowForge Components
-
-**Task Queue System** (from FlowForge)
-```typescript
-// Adapt FlowForge's BullMQ implementation
-// server/src/queue/index.ts
-```
-
-**Parallel Agent Pool** (from FlowForge)
-```typescript
-// Adapt agent pooling design
-// server/src/agents/agent-pool.ts
-```
-
-**Cost Tracking** (from FlowForge)
-```typescript
-// Import cost tracking tables and logic
-// server/src/tracking/cost-tracker.ts
-```
-
-#### 5.2 Parallel Task Execution
-```python
-# core/parallel_executor.py
-class ParallelTaskExecutor:
-    """Execute independent tasks in parallel"""
-
-    async def execute_parallel(self, tasks: List[Task]):
-        # Identify task dependencies
-        graph = self.build_dependency_graph(tasks)
-
-        # Group independent tasks
-        parallel_groups = self.identify_parallel_groups(graph)
-
-        # Execute groups
-        for group in parallel_groups:
-            await asyncio.gather(*[
-                self.execute_task(task) for task in group
-            ])
-```
-
-### Phase 6: Developer Experience (Week 6-7)
-
-#### 6.1 Enhanced CLI Commands
-```bash
-# New commands for better control
-yoke test <task_id>          # Test specific task
-yoke validate <epic_id>      # Validate epic
-yoke retry <session_id>      # Retry failed session
-yoke review <project_id>     # Trigger deep review
-yoke fix <issue_id>          # Auto-fix specific issue
-```
-
-#### 6.2 Web UI Enhancements
-- Real-time test results display
-- Epic validation dashboard
-- Session recovery controls
-- Quality gate visualization
-- Parallel execution monitor
-
-#### 6.3 Template System (from FlowForge)
-```python
-# core/templates.py
-class TemplateManager:
-    """Manage project templates"""
-
-    async def create_from_template(self, template_name: str):
-        # Load template configuration
-        # Generate initial tasks
-        # Set up project structure
-```
-
-## Implementation Timeline
-
-### Week 1-2: Testing Foundation
-- [ ] Implement TestGenerator
-- [ ] Create TaskVerifier
-- [ ] Add test execution to agent loop
-- [ ] Update MCP tools for testing
-- [ ] Create test report generation
-
-### Week 3-4: Validation & Recovery
-- [ ] Implement EpicValidator
-- [ ] Create epic loop-back mechanism
-- [ ] Add checkpoint system
-- [ ] Implement session recovery
-- [ ] Create failure analysis tools
-
-### Week 5-6: Quality & Performance
-- [ ] Enhance quality gates
-- [ ] Connect reviews to actions
-- [ ] Import FlowForge components
-- [ ] Implement parallel execution
-- [ ] Add cost tracking
-
-### Week 7-8: Integration & Polish
-- [ ] Full system integration
-- [ ] CLI enhancements
-- [ ] Web UI updates
-- [ ] Documentation
-- [ ] Testing & validation
-
-## Migration Strategy
-
-1. **No Breaking Changes**: All enhancements are additive
-2. **Feature Flags**: New features behind flags initially
-3. **Gradual Rollout**: Test with new projects first
-4. **Backward Compatible**: Existing projects continue to work
-
-## Success Metrics
-
-### Quality Metrics
-- Test coverage: > 70%
-- Task success rate: > 90%
-- Epic completion rate: > 85%
-- Session recovery rate: > 95%
-
-### Performance Metrics
-- Parallel execution speedup: 2-3x
-- Failed task retry success: > 80%
-- Time to fix issues: < 30 minutes
-- Session checkpoint overhead: < 5%
-
-### Developer Experience
-- CLI command usage: 5x increase
-- Web UI engagement: 3x increase
-- Template usage: 50% of projects
-- Manual intervention: 50% reduction
-
-## Risk Mitigation
-
-### Technical Risks
-- **Complexity**: Keep changes incremental
-- **Performance**: Profile and optimize critical paths
-- **Integration**: Extensive testing at each phase
-- **Data Loss**: Comprehensive checkpointing
-
-### Operational Risks
-- **Migration Issues**: Feature flags and gradual rollout
-- **User Confusion**: Clear documentation and UI
-- **Resource Usage**: Monitor and limit parallel execution
-- **Cost Increase**: Token usage optimization
-
-## Conclusion
-
-This refactoring plan addresses YokeFlow's critical gaps while preserving its architectural strengths. By focusing on testing, validation, and recovery, we can dramatically improve the reliability of generated code. The integration of FlowForge's best ideas (parallel execution, templates, cost tracking) provides additional value without requiring a complete rewrite.
-
-The incremental approach ensures we can deliver value quickly while maintaining system stability. Each phase builds on the previous one, creating a robust foundation for autonomous development.
-
-## Appendix: Code to Reuse from FlowForge
-
-### High-Value Components to Import
-
-1. **Queue System** (`/server/src/queue/`)
-   - BullMQ integration
-   - Job scheduling
-   - Retry logic
-
-2. **Agent Specialization** (`/server/src/agents/`)
-   - Frontend agent
-   - Backend agent
-   - Testing agent
-
-3. **Template System** (`/server/src/templates/`)
-   - Template marketplace
-   - Template instantiation
-   - Composition logic
-
-4. **Cost Tracking** (`/server/src/tracking/`)
-   - Token counting
-   - Cost calculation
-   - Budget management
-
-5. **Parallel Execution** (conceptual design from app_spec.txt)
-   - Task dependency analysis
-   - Parallel group identification
-   - Resource pooling
-
-### Components to Skip
-
-1. **tRPC Setup** - Adds complexity without immediate benefit
-2. **Fastify Migration** - Current Flask/FastAPI works well
-3. **Complex Webpack Config** - Caused issues in FlowForge
-4. **Authentication System** - Not critical for current needs
-
-## Specific Implementation Details (From Analysis)
-
-### Input Validation Framework (P1 - 8-10h)
-```python
-# core/validation.py
-from pydantic import BaseModel, Field, validator
-
-class ProjectCreateValidator(BaseModel):
-    """Validated project creation request"""
-    name: str = Field(..., min_length=1, max_length=255, regex="^[a-zA-Z0-9_-]+$")
-    spec_content: Optional[str] = Field(None, min_length=100, max_length=1_000_000)
-    force: bool = Field(False)
-
-    @validator('name')
-    def name_not_reserved(cls, v):
-        reserved = ['api', 'static', 'admin']
-        if v.lower() in reserved:
-            raise ValueError(f"'{v}' is reserved")
-        return v
-```
-
-### Health Check System (P1 - 6-8h)
-```python
-# api/health.py
-@app.get("/health")
-async def health_check():
-    """Comprehensive health check endpoint"""
-    checks = {
-        "database": await check_database(),
-        "mcp_server": await check_mcp(),
-        "docker": await check_docker(),
-        "disk_space": check_disk_space(),
-        "memory": check_memory()
-    }
-
-    status = "healthy" if all(checks.values()) else "unhealthy"
-    return {
-        "status": status,
-        "checks": checks,
-        "timestamp": datetime.utcnow()
-    }
-```
-
-### Resource Management (P2 - 10-12h)
-```python
-# core/resource_manager.py
-class ResourceManager:
-    """Manage system resources and limits"""
-
-    def __init__(self):
-        self.max_concurrent_sessions = 5
-        self.max_memory_per_session = 512  # MB
-        self.max_docker_containers = 10
-
-    async def check_resources(self) -> ResourceStatus:
-        """Check if resources available for new session"""
-        return ResourceStatus(
-            can_start=self.active_sessions < self.max_concurrent_sessions,
-            memory_available=self.get_available_memory(),
-            containers_available=self.get_container_slots()
-        )
-```
-
-### Performance Monitoring (P2 - 8-10h)
-```python
-# core/performance_monitor.py
-class PerformanceMonitor:
-    """Track and report performance metrics"""
-
-    async def track_operation(self, operation: str, duration: float):
-        """Track operation performance"""
-        await self.metrics_db.record({
-            "operation": operation,
-            "duration_ms": duration * 1000,
-            "timestamp": datetime.utcnow(),
-            "session_id": self.session_id
-        })
-
-    async def get_metrics_summary(self):
-        """Get performance summary for session"""
-        return await self.metrics_db.aggregate_metrics(self.session_id)
-```
-
-## Identified Code Issues to Fix
-
-### Silent Failures
-- **File**: `core/quality_integration.py`
-- **Fix**: Add proper exception categorization and logging
-
-### Weak Input Validation
-- **File**: `api/main.py`
-- **Fix**: Add Pydantic validators for all endpoints
-
-### Missing Health Checks
-- **Files**: Various API endpoints
-- **Fix**: Implement comprehensive health monitoring
-
-### Resource Leaks
-- **Files**: Docker container management
-- **Fix**: Proper cleanup and resource tracking
-
-## Quality Metrics to Achieve
-
-### Test Coverage Goals
-- Overall: 70%+ (currently 15-20%)
-- Core modules: 80%+
-- API endpoints: 70%+
-- Critical paths: 90%+
-
-### Performance Targets
-- Database retry success: >95%
-- Session recovery rate: >90%
-- API response time: <100ms avg
-- Session checkpoint overhead: <5%
-
-## Next Steps
-
-1. **Immediate Priorities**
-   - Complete test suite expansion (highest impact)
-   - Implement input validation (security/stability)
-   - Add health checks (operations)
-
-2. **Short Term (2-4 weeks)**
-   - Resource management implementation
-   - Performance monitoring setup
-   - Silent failure fixes
-
-3. **Long Term Integration**
-   - Gradual rollout with feature flags
-   - Monitor metrics and adjust
-   - Documentation updates
+YokeFlow v2.0 is **production-ready** with comprehensive test coverage (70%), complete REST API (17 endpoints), automated verification system, and production hardening features. This document outlines future enhancements to expand YokeFlow beyond greenfield web applications.
+
+**Current Status**: v2.0.0 Released (January 9, 2026)
+**Next Release**: v2.1 - Brownfield support and platform expansion
+**Long-term Vision**: Universal AI-powered development platform for all project types
 
 ---
 
-*Updated plan incorporates analysis findings. Total remaining work: 59-69 hours. Focus on P1 items first for maximum impact on reliability and confidence.*
+## 🚀 v2.1 Roadmap - Platform Expansion
+
+Focus: Expand YokeFlow beyond greenfield web applications.
+
+### Priority 1: Brownfield Support for UI Projects (20-25h)
+**Goal**: Enable YokeFlow to modify existing web applications from GitHub
+
+#### Phase 1: GitHub Integration (8-10h)
+- Import existing GitHub repositories
+- Codebase analysis and structure detection
+- Automatic dependency detection
+- Generate initial roadmap from existing code
+- Push generated/modified projects back to GitHub
+- Branch management and pull request creation
+
+#### Phase 2: Code Modification Capabilities (8-10h)
+- Modify existing codebases (not just greenfield)
+- Incremental refactoring strategies
+- Safe modification with rollback support
+- Merge conflict resolution
+- Legacy code modernization patterns
+
+#### Phase 3: Enhanced Testing for Modified Code (4-5h)
+- Regression test generation
+- Impact analysis (what changed, what might break)
+- Integration with existing test suites
+- Test coverage improvement automation
+
+**Success Criteria**:
+- ✅ Import React/Next.js projects from GitHub
+- ✅ Generate epics/tasks for enhancements
+- ✅ Modify code safely with tests
+- ✅ Push changes back to GitHub as PR
+- ✅ Support for multiple frontend frameworks
+
+### Priority 2: Non-UI Project Support (15-18h)
+**Goal**: Support backends, APIs, libraries, CLI tools, and data processing applications
+
+#### Phase 1: Project Type Detection (3-4h)
+- Detect project type from spec or codebase
+- Support for: REST APIs, GraphQL APIs, gRPC services
+- Support for: Python libraries, npm packages, CLI tools
+- Support for: Data pipelines, batch processors, workers
+
+#### Phase 2: Non-UI Testing Strategies (8-10h)
+- API endpoint testing (REST, GraphQL, gRPC)
+- Unit test generation for libraries
+- CLI command testing
+- Integration test generation for services
+- Performance testing for data pipelines
+- Contract testing for APIs
+
+#### Phase 3: Browser-Independent Verification (4-4h)
+- Adapt verification system for non-UI code
+- HTTP client testing (curl, httpx, fetch)
+- Database operation verification
+- File I/O and data processing verification
+- Service health checks
+
+**Success Criteria**:
+- ✅ Generate FastAPI REST API from spec
+- ✅ Generate Python library with tests
+- ✅ Generate CLI tool (Click, Typer)
+- ✅ Generate data processing pipeline
+- ✅ All without browser testing dependency
+
+### Priority 3: AI & Agent Improvements (10-15h)
+**Goal**: Enhance agent intelligence and code generation quality
+
+**Enhancements**:
+- Better error recovery and debugging
+- Improved code quality (reduce verbose code)
+- Context management for long sessions
+- Multi-file refactoring capabilities
+- Intelligent test case generation
+- Better dependency management
+- Framework/library version selection
+- Design pattern recognition and application
+
+**Research Areas**:
+- Fine-tuning for specific frameworks
+- RAG integration for framework docs
+- Codebase embedding for better context
+- Automated code review improvements
+
+---
+
+## 🔧 System Improvements (P2)
+
+### 1. Resource Management (10-12h)
+**Goal**: Better control over system resources
+
+**Features**:
+- Dynamic connection pool sizing based on load
+- Concurrent session limits (configurable, default: 5)
+- Memory usage per session caps
+- Docker container resource constraints (CPU, memory)
+- Automatic cleanup policies for old sessions/projects
+- Rate limiting for API endpoints
+- Resource usage monitoring and alerts
+
+**Benefits**:
+- Prevent system overload
+- Better multi-user support
+- Predictable performance
+- Cost control for hosted deployments
+
+### 2. Performance Monitoring (8-10h)
+**Goal**: Track and optimize platform performance
+
+**Metrics to Track**:
+- Operation timing (session duration, task completion time)
+- Token usage and cost tracking per session
+- Database query performance analysis
+- API endpoint response times
+- Session completion time benchmarks
+- Memory and CPU usage per session
+
+**Features**:
+- Real-time performance dashboard
+- Performance regression detection
+- Automated alerts for slow operations
+- Historical trend analysis
+- Cost optimization recommendations
+
+### 3. Health Check System (6-8h)
+**Goal**: Comprehensive system health monitoring
+
+**Components**:
+- Enhanced `/health/detailed` endpoint
+- Database connectivity with pool metrics
+- MCP server status verification
+- Docker container health tracking
+- Disk space and memory alerts
+- Service dependency checks
+
+**Features**:
+- Automated health checks (every 60s)
+- Alerting and notifications
+- Self-healing capabilities
+- Health status dashboard
+- Uptime tracking
+
+---
+
+## 📋 v2.2+ Future Enhancements
+
+These features are valuable but not critical for v2.1:
+
+### 1. Multi-User Support & Team Collaboration (15-18h)
+**Goal**: Enable teams to collaborate on YokeFlow projects
+
+**Features**:
+- User accounts with authentication
+- Project permissions (admin/developer/viewer)
+- Role-based access control (RBAC)
+- API key management per user
+- Activity logs and audit trails per user
+- Shared project workspaces
+- Team notifications and alerts
+
+**Database Changes**:
+- `users` table with authentication
+- `project_permissions` for access control
+- `team_members` for collaboration
+- `activity_logs` for audit trails
+
+### 2. Advanced Spec Features (8-10h)
+**Goal**: Make specification writing easier and more powerful
+
+**Features**:
+- Multiple spec files with dependency management
+- LLM-based primary file detection
+- Template bundles for common project types (e-commerce, SaaS, dashboard)
+- Spec file versioning and diff tracking
+- Interactive spec builder in Web UI
+- Spec validation with suggestions
+- Import specs from existing projects
+
+### 3. E2B Integration (10-12h)
+**Goal**: Replace Docker with E2B sandboxes for better performance
+
+**Benefits**:
+- Faster session startup (< 5 seconds)
+- Better resource management
+- Improved security isolation
+- Auto-scaling capabilities
+- Cloud-native architecture
+- Reduced infrastructure costs
+
+**Implementation**:
+- E2B SDK integration
+- Sandbox lifecycle management
+- File system virtualization
+- Network isolation
+- Migrate from Docker to E2B gradually
+
+### 4. Advanced Code Review (8-10h)
+**Goal**: AI-powered code review with actionable feedback
+
+**Features**:
+- Automated code review on every task
+- Security vulnerability detection
+- Performance optimization suggestions
+- Code smell identification
+- Best practices enforcement
+- Comparison with industry standards
+- Inline code annotations
+
+### 5. Template System (6-8h)
+**Goal**: Project templates for common use cases
+
+**Templates**:
+- E-commerce (Next.js + Stripe + PostgreSQL)
+- SaaS starter (Auth + billing + dashboard)
+- REST API (FastAPI + PostgreSQL + OpenAPI)
+- Mobile backend (Firebase-like)
+- Data dashboard (React + D3.js + PostgreSQL)
+- CLI tool (Python Click/Typer)
+
+**Features**:
+- Template marketplace
+- Custom template creation
+- Template versioning
+- One-click project creation from template
+
+---
+
+## 🔌 Integration Enhancements
+
+### 1. GitHub Integration (8-10h)
+**Features**:
+- Automatic repository creation
+- Branch management (feature branches per task)
+- Pull request creation with descriptions
+- Issue tracking integration
+- Commit message generation
+- GitHub Actions workflow generation
+- README.md generation
+
+### 2. Deployment Automation (10-12h)
+**Platforms**:
+- Vercel (Next.js, React)
+- Netlify (Static sites)
+- Railway (Full-stack apps)
+- Heroku (Python, Node.js)
+- AWS (EC2, Lambda, ECS)
+- Docker Compose (self-hosted)
+
+**Features**:
+- One-click deployment
+- Environment variable management
+- Database provisioning
+- Domain configuration
+- SSL certificate setup
+- Deployment rollback
+
+### 3. Task Manager Integration (6-8h)
+**Platforms**:
+- Jira
+- Linear
+- GitHub Projects
+- Trello
+- Asana
+
+**Features**:
+- Sync YokeFlow tasks with external systems
+- Bidirectional updates
+- Status synchronization
+- Comment synchronization
+- Attachment handling
+
+### 4. Real-time Collaboration (12-15h)
+**Features**:
+- Live session viewing by multiple users
+- Real-time logs streaming
+- Collaborative spec editing
+- Chat/comments per project
+- Notification system (webhooks, email, Slack)
+- Screen sharing for debugging
+
+---
+
+## 🤖 AI & Agent Improvements
+
+### 1. Agent Specialization (10-12h)
+**Goal**: Specialized agents for different tasks
+
+**Agent Types**:
+- **Frontend Agent**: React, Vue, Angular, Next.js expert
+- **Backend Agent**: FastAPI, Django, Express.js expert
+- **Database Agent**: Schema design, migrations, optimization
+- **DevOps Agent**: Deployment, CI/CD, infrastructure
+- **Testing Agent**: Test generation, coverage, E2E tests
+- **Security Agent**: Vulnerability scanning, best practices
+
+**Benefits**:
+- Better code quality per domain
+- Faster task completion
+- Domain-specific optimizations
+- Reduced errors
+
+### 2. Model Optimization (6-8h)
+**Goal**: Use the right model for each task
+
+**Strategies**:
+- **Dynamic Model Selection**: Choose model based on task complexity
+- **Cost Optimization**: Use cheaper models for simple tasks
+- **Context Management**: Reduce token usage with smart context
+- **Caching**: Cache common patterns and boilerplate
+- **Streaming**: Stream responses for better UX
+- **Batch Processing**: Process multiple tasks together
+
+### 3. Context-Aware Testing (6-8h)
+**Goal**: Smarter test generation based on task type
+
+**Features**:
+- Analyze task type (UI, API, database, logic)
+- Generate appropriate test types only
+- Skip browser tests for non-UI code
+- Generate performance tests for critical paths
+- Integration test generation across components
+- Mock generation for external dependencies
+
+---
+
+## 📊 Analytics & Monitoring
+
+### 1. Project Analytics (6-8h)
+**Metrics**:
+- Project completion rate
+- Average time to complete projects
+- Most common project types
+- Task complexity distribution
+- Code quality scores over time
+- Test coverage trends
+- Bug density
+
+**Visualizations**:
+- Project timeline
+- Task completion funnel
+- Code quality trends
+- Cost breakdown
+- Resource usage graphs
+
+### 2. Session Metrics (4-6h)
+**Metrics**:
+- Session success rate
+- Average session duration
+- Token usage per session
+- Cost per session
+- Errors per session
+- Retry frequency
+- Intervention frequency
+
+### 3. Quality Trends (4-6h)
+**Metrics**:
+- Code quality over time
+- Test coverage trends
+- Review findings trends
+- Technical debt accumulation
+- Performance regression detection
+- Security vulnerability trends
+
+---
+
+## 🐛 Known Issues & Technical Debt
+
+### 1. Docker Desktop Stability on macOS
+**Issue**: Docker Desktop can crash even when Mac doesn't sleep
+**Workaround**: `docker-watchdog.sh` script auto-restarts Docker
+**Improvement**: Implement connection pooling with automatic reconnection
+
+### 2. Database Connection Pool Exhaustion
+**Issue**: Long-running sessions can exhaust connection pool
+**Mitigation**: Implemented retry logic with exponential backoff
+**Improvement**: Dynamic pool sizing based on active sessions
+
+### 3. Selective Browser Testing
+**Issue**: All tasks use browser testing, even non-UI tasks
+**Impact**: Slower verification, unnecessary resource usage
+**Solution**: Implement task type detection and selective verification
+
+---
+
+## 📅 Implementation Roadmap
+
+### v2.1 Release (Q1 2026)
+**Focus**: Platform expansion
+**Timeline**: 8-12 weeks
+**Effort**: 45-58 hours
+
+**Priorities**:
+1. Brownfield UI support (20-25h)
+2. Non-UI project support (15-18h)
+3. AI & agent improvements (10-15h)
+
+**Success Criteria**:
+- ✅ Import and modify existing GitHub projects
+- ✅ Generate APIs, libraries, CLI tools without UI
+- ✅ Improved code quality and error recovery
+- ✅ 80%+ test coverage maintained
+
+### v2.2 Release (Q2 2026)
+**Focus**: Enterprise features
+**Timeline**: 10-14 weeks
+**Effort**: 50-60 hours
+
+**Priorities**:
+1. Multi-user support & authentication (15-18h)
+2. Advanced spec features (8-10h)
+3. Performance monitoring (8-10h)
+4. E2B integration (10-12h)
+5. Resource management (10-12h)
+
+**Success Criteria**:
+- ✅ Support for teams and collaboration
+- ✅ Template system for rapid project creation
+- ✅ E2B sandbox integration
+- ✅ Comprehensive monitoring and analytics
+
+### v3.0 and Beyond (H2 2026+)
+**Focus**: AI advancement & integrations
+**Features**:
+- Agent specialization
+- Advanced code review
+- Deployment automation
+- Real-time collaboration
+- Task manager integrations
+- Template marketplace
+
+---
+
+## 📊 Success Metrics
+
+**Platform Metrics**:
+- Projects created per week
+- Success rate (projects that complete)
+- User satisfaction (NPS score)
+- Average project completion time
+- Cost per project
+
+**Technical Metrics**:
+- Test coverage: 80%+ (current: 70%)
+- API response time: < 200ms p95
+- Session success rate: > 90%
+- System uptime: > 99.5%
+- Database query performance: < 100ms p95
+
+**Quality Metrics**:
+- Code quality score: > 8/10
+- Test coverage in generated code: > 70%
+- Security vulnerabilities: 0 critical
+- Review findings: Declining trend
+- Technical debt ratio: < 5%
+
+---
+
+## 🚀 Long-term Vision
+
+**Comprehensive AI-Powered Development Platform** supporting:
+- **Greenfield Projects**: Create new applications from scratch ✅ (v2.0)
+- **Brownfield Projects**: Modify existing codebases (v2.1)
+- **All Project Types**: Web, API, library, CLI, data processing (v2.1)
+- **Team Collaboration**: Multi-user with permissions (v2.2)
+- **Enterprise Features**: SSO, audit logs, compliance (v3.0+)
+- **Deployment**: One-click deploy to any platform (v2.2)
+- **Templates**: Project marketplace for rapid start (v2.2)
+- **Advanced AI**: Specialized agents, RAG, fine-tuning (v3.0+)
+
+---
+
+## 📚 Additional Resources
+
+- **TODO-FUTURE.md** - Detailed feature ideas and enhancements
+- **CONTRIBUTING.md** - How to contribute to YokeFlow development
+- **CHANGELOG.md** - Version history and release notes
+- **docs/** - Comprehensive documentation for all features
+
+---
+
+*Last Updated: January 9, 2026 - v2.0.0 Released*

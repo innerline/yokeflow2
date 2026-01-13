@@ -24,8 +24,8 @@ from datetime import datetime, timedelta
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.orchestrator import AgentOrchestrator
-from core.database_connection import DatabaseManager
+from server.agent.orchestrator import AgentOrchestrator
+from server.database.connection import DatabaseManager
 
 
 async def list_running_sessions():

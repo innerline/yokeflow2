@@ -243,15 +243,22 @@ bash_docker({ command: "npm install" })  // File is already there!
 
 **Server startup best practice:**
 ```bash
-# Start servers
-mcp__task-manager__bash_docker({ command: "./init.sh" })
+# Check if server is running first
+mcp__task-manager__bash_docker({
+  command: "curl -s http://localhost:3000 > /dev/null 2>&1 && echo 'Server running' || echo 'Server not running'"
+})
 
-# Wait longer than you think (8+ seconds, NOT 3!)
+# If not running, start it in background
+mcp__task-manager__bash_docker({
+  command: "nohup npm run dev > /dev/null 2>&1 &"
+})
+
+# Wait for server to be ready
 mcp__task-manager__bash_docker({ command: "sleep 8" })
 
 # Health check loop - wait until ready
 mcp__task-manager__bash_docker({
-  command: "for i in {1..10}; do curl -s http://localhost:5173 > /dev/null && echo 'Frontend ready' && break; sleep 1; done"
+  command: "for i in {1..10}; do curl -s http://localhost:3000 > /dev/null && echo 'Server ready' && break; sleep 1; done"
 })
 
 # Now safe for Playwright
@@ -804,63 +811,13 @@ Create an empty `.env.example` with a comment:
 
 ---
 
-## TASK 4: Create init.sh
+## TASK 4: [SKIPPED - Handled by Coding Sessions]
 
-Create a script called `init.sh` that future agents can use to set up and run
-the development environment. Base this on the technology stack in app_spec.txt.
-
-**The script should:**
-1. Check for .env file (copy from .env.example if missing)
-2. Install dependencies (npm, pip, etc. as needed)
-3. Initialize databases if needed
-4. Start development servers
-5. Print helpful information about accessing the app
-
-**Example structure:**
-
-```bash
-#!/bin/bash
-# Initialize and run the development environment
-
-set -e
-
-echo "🚀 Setting up project..."
-
-# Environment setup
-if [ ! -f .env ]; then
-    if [ -f .env.example ]; then
-        echo "⚙️  Creating .env from .env.example..."
-        cp .env.example .env
-        echo "⚠️  Please edit .env with your actual configuration values"
-        echo ""
-        read -p "Press Enter after you've configured .env (or Ctrl+C to exit)..."
-    fi
-fi
-
-# Install dependencies (adjust based on app_spec.txt tech stack)
-echo "📦 Installing dependencies..."
-# npm install, pip install, etc.
-
-# Database setup
-if [ ! -f <database_file> ]; then
-    echo "🗄️ Initializing database..."
-    # Database init commands
-fi
-
-# Start servers
-echo "🌐 Starting development servers..."
-echo ""
-echo "Application will be available at: http://localhost:<port>"
-echo ""
-
-# Start command (adjust based on stack)
-# npm run dev, python manage.py runserver, etc.
-```
-
-Make it executable:
-```bash
-chmod +x init.sh
-```
+<!--
+REMOVED: init.sh creation to prevent blocking issues
+The coding agent will handle dev server startup intelligently in Session 1
+by checking if server is running and starting it with nohup/background if needed
+-->
 
 ---
 
@@ -922,7 +879,7 @@ Before your context fills up:
 - **Expanded ALL [N] epics into [N] total detailed tasks**
 - **Created [N] test cases for all tasks**
 - Set up project structure for [tech stack]
-- Created init.sh
+- Created .env.example with required variables
 - **Complete project roadmap ready - no epics need expansion**
 
 ### Epic Summary
@@ -936,7 +893,7 @@ Total Tests: [N]
 All epics have been expanded. The project is ready for implementation.
 
 ### Next Session Should
-1. Start servers using init.sh
+1. Check if dev server is running (start if needed)
 2. Get next task with mcp__task-manager__get_next_task
 3. Begin implementing features
 4. Run browser-based verification tests

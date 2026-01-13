@@ -1,21 +1,50 @@
-# Quick Start Guide
+# YokeFlow 2 - Quick Start Guide
 
-This guide will get you up and running with YokeFlow in 5 minutes.
+Get up and running with YokeFlow 2's refactored architecture in 5 minutes.
+
+## What's New in YokeFlow 2.0
+
+- **REST API Complete**: 17 endpoints with comprehensive validation (89% test coverage)
+- **Input Validation**: Pydantic framework ensuring type safety and clear error messages
+- **Verification System**: Automated test generation for task completion and epic validation
+- **Reorganized Architecture**: All server code under `server/` with clear module separation
+- **Production Hardening**: Database retry logic, session checkpointing, intervention system
+- **Enhanced Testing**: 70% coverage achieved with 212 total tests
+
+## Project Structure
+
+```
+server/
+├── agent/        # Session orchestration & lifecycle
+├── api/          # REST API & WebSocket endpoints
+├── database/     # PostgreSQL operations & retry logic
+├── quality/      # Review system & quality gates
+├── verification/ # Task & epic validation
+├── client/       # Claude & Playwright clients
+├── sandbox/      # Docker container management
+└── utils/        # Shared utilities & config
+```
 
 ## Prerequisites
 
-1. **PostgreSQL Database** (via Docker)
+1. **Node.js 20+ and Python 3.9+**
+   ```bash
+   node --version  # Should show v20.x.x or newer
+   python --version  # Should show 3.9 or newer
+   ```
+
+2. **PostgreSQL Database** (via Docker)
    ```bash
    docker-compose up -d
    python scripts/init_database.py --docker
    ```
 
-2. **Python Dependencies**
+3. **Python Dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **MCP Task Manager** (TypeScript)
+4. **MCP Task Manager** (TypeScript)
    ```bash
    cd mcp-task-manager
    npm install
@@ -23,7 +52,7 @@ This guide will get you up and running with YokeFlow in 5 minutes.
    cd ..
    ```
 
-4. **Next.js Web UI**
+5. **Next.js Web UI**
    ```bash
    cd web-ui
    cp .env.local.example .env.local
@@ -31,13 +60,17 @@ This guide will get you up and running with YokeFlow in 5 minutes.
    cd ..
    ```
 
-5. **Authentication Token**
+6. **Authentication Token**
    ```bash
+   # Install Claude Code CLI
+   npm install -g @anthropic-ai/claude-code
+
    # Set up Claude Code token
    claude setup-token
 
-   # Add to .env file
-   echo "CLAUDE_CODE_OAUTH_TOKEN=your_token_here" >> .env
+   # Copy environment template and add your token
+   cp .env.example .env
+   # Edit .env and set CLAUDE_CODE_OAUTH_TOKEN
    ```
 
 ## Starting the Platform
@@ -45,10 +78,13 @@ This guide will get you up and running with YokeFlow in 5 minutes.
 **Terminal 1 - Start API Server:**
 ```bash
 # Using wrapper script (recommended)
-python api/start_api.py
+python server/api/start.py
 
-# OR using uvicorn directly (add --reload only if developing API code)
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+# OR using uvicorn directly
+uvicorn server.api.app:app --host 0.0.0.0 --port 8000
+
+# For development with auto-reload
+uvicorn server.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 2 - Start Web UI:**
@@ -81,11 +117,15 @@ Then open http://localhost:3000 in your browser.
 
 ### Issue: "API server not responding at localhost:8000"
 
-**Problem:** You ran `python api/main.py` directly (this doesn't work)
+**Problem:** You ran the API file directly instead of using uvicorn
 
-**Solution:** Use uvicorn instead:
+**Solution:** Use uvicorn to start the server:
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+# Correct way to start the API
+uvicorn server.api.app:app --host 0.0.0.0 --port 8000 --reload
+
+# Or use the wrapper script
+python server/api/start.py
 ```
 
 ### Issue: "Database connection error"
@@ -118,22 +158,60 @@ cp .env.example .env
 # Edit .env and add your token
 ```
 
+### Issue: "Import errors after update"
+
+**Problem:** Old import paths from api/, core/, or review/ folders
+
+**Solution:** All code has been moved to server/:
+```python
+# Old imports (no longer work)
+from core.agent import Agent
+from api.main import app
+from review.review_client import ReviewClient
+
+# New imports (correct)
+from server.agent.agent import SessionManager
+from server.api.app import app
+from server.quality.reviews import ReviewClient
+```
+
 ## Verifying Everything Works
 
-1. **Check API Server:**
+1. **Check API Health:**
    ```bash
-   curl http://localhost:8000/api/health
-   # Should return: {"status":"healthy",...}
+   curl http://localhost:8000/health
+   # Should return JSON with status and component checks
    ```
 
-2. **Check Database:**
+2. **Check API Detailed Health:**
+   ```bash
+   curl http://localhost:8000/health/detailed
+   # Should return JSON with database, mcp_server, disk, sessions status
+   ```
+
+3. **Check API Projects Endpoint:**
+   ```bash
+   curl http://localhost:8000/api/projects
+   # Should return: []  (empty array if no projects yet)
+   ```
+
+4. **Check Database:**
    ```bash
    psql postgresql://agent:agent_dev_password@localhost:5432/yokeflow -c "SELECT 1;"
    # Should return: 1
    ```
 
-3. **Check Web UI:**
-   Open http://localhost:3000 - you should see the project list page
+5. **Check MCP Server:**
+   ```bash
+   ls mcp-task-manager/build/index.js
+   # File should exist after npm run build
+   ```
+
+6. **Check Web UI:**
+   Open http://localhost:3000 - you should see the YokeFlow dashboard
+
+7. **Check API Documentation:**
+   Open http://localhost:8000/docs - interactive Swagger UI for all 17+ endpoints
 
 ## Next Steps
 
@@ -156,9 +234,11 @@ cp .env.example .env
 
 - [README.md](README.md) - Full platform overview
 - [CLAUDE.md](CLAUDE.md) - Quick reference guide
+- [YOKEFLOW_REFACTORING_PLAN.md](YOKEFLOW_REFACTORING_PLAN.md) - Roadmap and improvements
 - [docs/developer-guide.md](docs/developer-guide.md) - Comprehensive technical guide
-- [docs/api-usage.md](docs/api-usage.md) - API documentation
-- [TODO-FUTURE.md](TODO-FUTURE.md) - Post-release enhancements
+- [docs/api-usage.md](docs/api-usage.md) - Complete API endpoint reference
+- [docs/verification-system.md](docs/verification-system.md) - Automated testing framework (850+ lines)
+- [docs/input-validation.md](docs/input-validation.md) - Validation framework guide
 
 ## Getting Help
 

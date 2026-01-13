@@ -20,6 +20,32 @@ project:
   default_generations_dir: generations
   max_iterations: null  # unlimited
 
+  verification:
+  # Core settings
+  enabled: true                       # Enable/disable verification system
+  auto_retry: true                    # Automatically retry failed tests
+  max_retries: 3                      # Maximum retry attempts
+  test_timeout: 30                    # Test timeout in seconds
+  require_all_tests_pass: true        # All tests must pass
+  min_test_coverage: 0.8              # Minimum coverage (0.0-1.0)
+
+  # Test generation settings
+  generate_unit_tests: true           # Generate unit tests
+  generate_api_tests: true            # Generate API tests
+  generate_browser_tests: true        # Generate browser tests
+  generate_integration_tests: false   # Generate integration tests (more complex)
+
+  # File tracking
+  track_file_modifications: true      # Track modified files
+
+  # Notification settings
+  webhook_url: null                   # Webhook for verification events
+
+  # Auto-pause conditions
+  error_rate_threshold: 0.15          # Pause if error rate > 15%
+  session_duration_limit: 600         # Pause after 10 min on same task
+  detect_infrastructure_errors: true  # Pause on DB/Redis errors
+
 review:
   min_reviews_for_analysis: 5  # Minimum deep reviews required for prompt improvement analysis
 

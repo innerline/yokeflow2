@@ -30,6 +30,10 @@ interface UseProjectWebSocketOptions {
   // Prompt improvement callbacks
   onPromptImprovementComplete?: (analysisId: string, proposalsCount: number) => void;
   onPromptImprovementFailed?: (analysisId: string, error: string) => void;
+  // Deep review callbacks
+  onDeepReviewStarted?: (sessionId: string, sessionNumber: number) => void;
+  onDeepReviewCompleted?: (sessionId: string, sessionNumber: number) => void;
+  onDeepReviewFailed?: (sessionId: string, sessionNumber: number, error: string) => void;
 }
 
 export function useProjectWebSocket(
@@ -56,6 +60,9 @@ export function useProjectWebSocket(
   const onTestUpdatedRef = useRef(options?.onTestUpdated);
   const onPromptImprovementCompleteRef = useRef(options?.onPromptImprovementComplete);
   const onPromptImprovementFailedRef = useRef(options?.onPromptImprovementFailed);
+  const onDeepReviewStartedRef = useRef(options?.onDeepReviewStarted);
+  const onDeepReviewCompletedRef = useRef(options?.onDeepReviewCompleted);
+  const onDeepReviewFailedRef = useRef(options?.onDeepReviewFailed);
 
   useEffect(() => {
     onSessionCompleteRef.current = options?.onSessionComplete;
@@ -66,7 +73,10 @@ export function useProjectWebSocket(
     onTestUpdatedRef.current = options?.onTestUpdated;
     onPromptImprovementCompleteRef.current = options?.onPromptImprovementComplete;
     onPromptImprovementFailedRef.current = options?.onPromptImprovementFailed;
-  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed]);
+    onDeepReviewStartedRef.current = options?.onDeepReviewStarted;
+    onDeepReviewCompletedRef.current = options?.onDeepReviewCompleted;
+    onDeepReviewFailedRef.current = options?.onDeepReviewFailed;
+  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed, options?.onDeepReviewStarted, options?.onDeepReviewCompleted, options?.onDeepReviewFailed]);
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -232,6 +242,28 @@ export function useProjectWebSocket(
               console.error(`[WebSocket] Prompt improvement analysis failed:`, data.error);
               if (onPromptImprovementFailedRef.current && data.analysis_id) {
                 onPromptImprovementFailedRef.current(data.analysis_id, data.error || 'Unknown error');
+              }
+              break;
+
+            // Deep review events
+            case 'deep_review_started':
+              console.log(`[WebSocket] Deep review started for session ${data.session_number}`);
+              if (onDeepReviewStartedRef.current && data.session_id && data.session_number) {
+                onDeepReviewStartedRef.current(data.session_id, data.session_number);
+              }
+              break;
+
+            case 'deep_review_completed':
+              console.log(`[WebSocket] Deep review completed for session ${data.session_number}`);
+              if (onDeepReviewCompletedRef.current && data.session_id && data.session_number) {
+                onDeepReviewCompletedRef.current(data.session_id, data.session_number);
+              }
+              break;
+
+            case 'deep_review_failed':
+              console.error(`[WebSocket] Deep review failed for session ${data.session_number}:`, data.error);
+              if (onDeepReviewFailedRef.current && data.session_id && data.session_number) {
+                onDeepReviewFailedRef.current(data.session_id, data.session_number, data.error || 'Unknown error');
               }
               break;
           }

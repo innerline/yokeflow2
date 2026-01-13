@@ -41,7 +41,7 @@ export class TaskDatabase {
   }
 
   // Execute a query and return results
-  private async query<T>(sql: string, params: any[] = []): Promise<T[]> {
+  async query<T>(sql: string, params: any[] = []): Promise<T[]> {
     try {
       const result = await this.pool.query(sql, params);
       return result.rows as T[];
@@ -563,6 +563,18 @@ export class TaskDatabase {
       SET completed_at = COALESCE(completed_at, NOW())
       WHERE id = $1
     `, [this.projectId]);
+  }
+
+  async getProjectName(): Promise<string> {
+    const result = await this.query<{name: string}>(`
+      SELECT name FROM projects WHERE id = $1
+    `, [this.projectId]);
+
+    if (!result || result.length === 0) {
+      throw new Error(`Project ${this.projectId} not found`);
+    }
+
+    return result[0].name;
   }
 
   async close(): Promise<void> {

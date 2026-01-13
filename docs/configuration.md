@@ -30,7 +30,7 @@ The system looks for configuration files in this order:
 
 3. **Built-in defaults**
    - Used if no config file found
-   - See [core/config.py](../core/config.py) for default values
+   - See [server/utils/config.py](../server/utils/config.py) for default values
 
 **Note**: Web UI settings (selected during project creation) override config file defaults.
 
@@ -72,7 +72,46 @@ security:
     - custom-deploy-tool
 ```
 
-These are added to the built-in blocklist in [security.py](../security.py).
+These are added to the built-in blocklist in [server/utils/security.py](../server/utils/security.py).
+
+### Verification
+
+Control automatic task verification and testing (v2.0):
+
+```yaml
+verification:
+  enabled: true                       # Enable/disable verification system
+  auto_retry: true                    # Automatically retry failed tests
+  max_retries: 3                      # Maximum retry attempts
+  test_timeout: 30                    # Test timeout in seconds
+  require_all_tests_pass: true        # All tests must pass
+  min_test_coverage: 0.8              # Minimum coverage (0.0-1.0)
+
+  # Test generation
+  generate_unit_tests: true           # Generate unit tests
+  generate_api_tests: true            # Generate API tests
+  generate_browser_tests: true        # Generate browser tests
+  generate_integration_tests: false   # Generate integration tests (more complex)
+
+  # File tracking
+  track_file_modifications: true      # Track modified files
+
+  # Notification settings
+  webhook_url: null                   # Webhook for verification events
+
+  # Auto-pause conditions
+  error_rate_threshold: 0.15          # Pause if error rate > 15%
+  session_duration_limit: 600         # Pause after 10 min on same task
+  detect_infrastructure_errors: true  # Pause on DB/Redis errors
+```
+
+**Key Features:**
+- **Automatic test generation**: Creates unit, API, and browser tests based on task description
+- **Retry logic**: Up to 3 retry attempts with failure analysis
+- **Epic validation**: Integration testing across completed tasks
+- **File tracking**: Monitors which files were modified during task completion
+
+See [docs/verification-system.md](verification-system.md) for complete guide.
 
 ### Project
 
@@ -162,6 +201,23 @@ timing:
   auto_continue_delay: 5  # Slower, more stable
 ```
 
+### Example 4: Enable Verification System (v2.0)
+
+Enable automatic task verification with test generation:
+
+```yaml
+verification:
+  enabled: true
+  auto_retry: true
+  max_retries: 3
+  generate_unit_tests: true
+  generate_api_tests: true
+  generate_browser_tests: true
+  track_file_modifications: true
+```
+
+This ensures all completed tasks pass automated tests before being marked as done.
+
 ## Validation
 
 The config system validates settings on load:
@@ -184,6 +240,7 @@ See [.yokeflow.yaml.example](../.yokeflow.yaml.example) for a complete configura
 
 ## See Also
 
-- [config.py](../config.py) - Configuration implementation
+- [server/utils/config.py](../server/utils/config.py) - Configuration implementation
 - [.yokeflow.yaml.example](../.yokeflow.yaml.example) - Full example with comments
+- [docs/verification-system.md](verification-system.md) - Verification system guide (v2.0)
 

@@ -519,6 +519,97 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 
 ---
 
+## 🔒 AUTOMATIC VERIFICATION SYSTEM
+
+**CRITICAL:** YokeFlow has an automatic test generation and verification system that runs when you mark tasks complete.
+
+### How It Works
+
+1. **You implement the task** using Write/Edit tools
+2. **You attempt to mark complete** with `update_task_status({task_id: "...", done: true})`
+3. **MCP server intercepts** and automatically:
+   - Generates appropriate tests based on task type
+   - Executes tests in isolated environment
+   - Analyzes failures and provides feedback
+   - **BLOCKS task completion if tests fail**
+4. **You fix issues** and try again
+5. **Tests pass** → Task marked complete ✅
+
+### What This Means For You
+
+**✅ DO:**
+- Implement code changes normally using Write/Edit tools
+- Call `update_task_status` when you believe task is complete
+- Read verification error messages carefully (they tell you what's failing)
+- Fix issues and call `update_task_status` again
+- Trust the verification system - it knows what tests to run
+
+**❌ DON'T:**
+- Try to manually write Playwright tests (system generates them for you)
+- Mark tasks complete without fixing verification failures
+- Skip verification by not calling `update_task_status`
+- Assume task is done just because code compiles
+
+### Verification Error Response
+
+When tests fail, you'll see:
+```
+❌ Task {id} CANNOT be marked complete - verification failed:
+
+✗ Task verification FAILED
+  Status: failed
+  Tests run: 5
+  Tests passed: 3
+  Tests failed: 2
+  Reason: Browser test failed - Button not found with text "Submit"
+
+Task CANNOT be marked complete until tests pass.
+Please fix the issues and try again.
+```
+
+**Your response:**
+1. Read the failure reason carefully
+2. Fix the specific issue (e.g., add missing button)
+3. Call `update_task_status` again
+4. System will re-run verification automatically
+
+### Verification Success Response
+
+When tests pass, you'll see:
+```
+Task {id} marked as completed
+✅ All verification tests passed!
+```
+
+### Manual Verification (Optional)
+
+You can manually trigger verification before marking complete:
+```javascript
+mcp__task-manager__run_task_verification({
+  task_id: "task-uuid"
+})
+```
+
+### Types of Auto-Generated Tests
+
+- **Unit tests**: For utility functions, helpers, pure logic
+- **API tests**: For REST endpoints, GraphQL resolvers
+- **Browser tests**: For UI components, user workflows
+- **Integration tests**: For multi-component features
+- **E2E tests**: For complete user journeys
+
+### Key Point
+
+**You don't need to write tests yourself - the system does it for you.**
+
+Your job is to:
+1. Implement the feature
+2. Attempt to mark complete
+3. Fix issues if verification fails
+4. Repeat until tests pass
+
+---
+
 ## MCP TASK TOOLS QUICK REFERENCE
 
 **Query:**

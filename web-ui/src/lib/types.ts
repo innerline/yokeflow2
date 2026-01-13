@@ -169,7 +169,10 @@ export interface WebSocketMessage {
     | 'all_epics_complete'  // All epics finished
     | 'project_complete'  // Project fully complete
     | 'prompt_improvement_complete'  // Prompt improvement analysis completed
-    | 'prompt_improvement_failed';  // Prompt improvement analysis failed
+    | 'prompt_improvement_failed'  // Prompt improvement analysis failed
+    | 'deep_review_started'  // Deep review started for a session
+    | 'deep_review_completed'  // Deep review completed successfully
+    | 'deep_review_failed';  // Deep review failed with error
   progress?: Progress;
   session_id?: string;
   status?: SessionStatus;
@@ -177,7 +180,7 @@ export interface WebSocketMessage {
   message?: string;  // For api_key_warning and other text messages
   // NEW Phase 1.3 fields
   session?: Session;  // For session_started event
-  session_number?: number;  // For assistant_message and tool_use events
+  session_number?: number;  // For assistant_message, tool_use, and deep review events
   message_number?: number;  // For assistant_message event
   // Task/test update fields
   task_id?: number;  // For task_updated event
@@ -470,6 +473,7 @@ export interface ProjectReviewStats {
   sessions_without_reviews: number;
   coverage_percent: number;
   unreviewed_session_numbers: number[];
+  reviewed_session_numbers: number[];
 }
 
 /**

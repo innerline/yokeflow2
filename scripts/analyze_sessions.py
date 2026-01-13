@@ -21,7 +21,7 @@ from pathlib import Path
 # Add parent directory to path so we can import database
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.database import TaskDatabase
+from server.database.operations import TaskDatabase
 
 # Load .env file if it exists
 def load_env():

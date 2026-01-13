@@ -44,6 +44,32 @@ export default function PromptAnalysisDetailComponent({ analysisId }: Props) {
     }
   };
 
+  const downloadRawReport = async () => {
+    try {
+      const rawReport = await api.getRawAnalysisReport(analysisId);
+
+      // Create a blob with the JSON data
+      const blob = new Blob([JSON.stringify(rawReport, null, 2)], { type: 'application/json' });
+
+      // Create a download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `analysis_${analysisId}_raw_report.json`;
+
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+
+      // Cleanup
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Failed to download raw report:', err);
+      alert('Failed to download raw report: ' + (err.message || 'Unknown error'));
+    }
+  };
+
   const handleProposalUpdated = (updatedProposal: PromptProposal) => {
     setProposals(proposals.map(p =>
       p.id === updatedProposal.id ? updatedProposal : p
@@ -112,7 +138,16 @@ export default function PromptAnalysisDetailComponent({ analysisId }: Props) {
             </a>
             <h1 className="text-3xl font-bold">Analysis Details</h1>
           </div>
-          <div>{getStatusBadge(analysis.status)}</div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={downloadRawReport}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm"
+              title="Download the complete analysis report with all raw data for debugging"
+            >
+              📥 Download Raw Report
+            </button>
+            {getStatusBadge(analysis.status)}
+          </div>
         </div>
         <div className="text-sm text-gray-500 dark:text-gray-400">
           Created: {formatDate(analysis.created_at)}
@@ -236,11 +271,31 @@ export default function PromptAnalysisDetailComponent({ analysisId }: Props) {
         <h2 className="text-xl font-semibold mb-4">Prompt Change Proposals</h2>
         {proposals.length === 0 ? (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-            No proposals generated for this analysis.
-            {analysis.sessions_analyzed > 0 && (
+            <p className="mb-4">No proposals generated for this analysis.</p>
+            {analysis.sessions_analyzed > 0 && analysis.status === 'completed' ? (
+              <div className="space-y-3">
+                <p className="text-sm">
+                  This could mean:
+                </p>
+                <ul className="text-sm text-left max-w-md mx-auto list-disc space-y-1">
+                  <li>The sessions analyzed are already high quality</li>
+                  <li>No systemic issues were detected</li>
+                  <li>There was an issue parsing the AI response</li>
+                </ul>
+                <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                    💡 <strong>Tip:</strong> Download the raw report using the button above to review
+                    the complete analysis data and check for any parsing issues.
+                  </p>
+                </div>
+              </div>
+            ) : analysis.status === 'running' ? (
               <p className="mt-2 text-sm">
-                This typically means the sessions analyzed are already high quality
-                and no systemic issues were detected.
+                Analysis is still in progress. Please wait for it to complete.
+              </p>
+            ) : (
+              <p className="mt-2 text-sm">
+                Analysis may have encountered an issue. Check the raw report for details.
               </p>
             )}
           </div>

@@ -173,7 +173,7 @@ docker-compose up -d
 
 The PostgreSQL schema includes:
 
-### Main Tables
+### Main Tables (Core Schema)
 - **projects**: Central project metadata
 - **sessions**: Agent session tracking
 - **epics**: High-level feature areas
@@ -182,6 +182,19 @@ The PostgreSQL schema includes:
 - **reviews**: Quality tracking
 - **github_commits**: Git integration
 - **project_preferences**: Per-project settings
+
+### Production Hardening Tables (v1.4.0+)
+- **paused_sessions**: Intervention system (schema 011)
+- **intervention_actions**: Action tracking (schema 011)
+- **notification_preferences**: User notifications (schema 011)
+- **session_checkpoints**: Recovery system (schema 012)
+- **checkpoint_recoveries**: Recovery history (schema 012)
+
+### Verification System Tables (v2.0+)
+- **task_verifications**: Task testing results (schema 016)
+- **epic_validations**: Epic integration tests (schema 016)
+- **generated_tests**: Test catalog (schema 016)
+- **verification_history**: Audit trail (schema 016)
 
 ### Custom Types (ENUMs)
 - `project_status`: active, paused, completed, archived
@@ -198,29 +211,62 @@ The PostgreSQL schema includes:
 - GIN indexes for JSON performance
 - Triggers for auto-updating timestamps
 
+## Database Migration Files
+
+The schema directory contains the base schema and migration files:
+
+**Base Schema**:
+- `schema/postgresql/schema.sql` - Complete base schema for fresh installations
+
+**Migration Files** (apply in order if upgrading from v1.0-v1.4):
+- `011_paused_sessions.sql` - Intervention system (v1.4.0)
+- `012_session_checkpoints.sql` - Checkpoint recovery (v1.4.0)
+- `013_task_verification.sql` - Task verification (v2.0)
+- `014_epic_validation.sql` - Epic validation (v2.0)
+- `015_quality_gates.sql` - Quality gates (v2.0)
+- `016_verification_system.sql` - Complete verification framework (v2.0)
+
+**Fresh Install (Recommended)**:
+```bash
+# For new installations, use schema.sql which includes all features
+python scripts/init_database.py
+```
+
+**Upgrade from v1.4**:
+```bash
+# Apply only the new verification system migration
+psql $DATABASE_URL < schema/postgresql/016_verification_system.sql
+```
+
+**Note**: YokeFlow v2.0 requires a fresh installation. Migration from v1.x is not supported.
+
 ## Migration Status
 
-✅ **Migration Complete**
+✅ **v2.0 Complete**
 
-All phases have been completed:
+All v2.0 features have been completed:
 1. ✅ PostgreSQL configuration and connection layer
 2. ✅ Orchestrator migration with async/await
 3. ✅ REST API migration with all endpoints
-4. ✅ Project structure changes (prompts, MCP server, CLI)
-5. ✅ Integration testing and validation
+4. ✅ Project structure changes (reorganized under `server/`)
+5. ✅ Integration testing and validation (70% coverage)
 6. ✅ Code consolidation (removed all `_pg` duplicate files)
+7. ✅ Production hardening (retry logic, intervention, checkpointing)
+8. ✅ Verification system (automatic task testing)
 
 The codebase is now **PostgreSQL-only** with no SQLite dependencies remaining.
 
-## Current Architecture
+## Current Architecture (v2.0)
 
-- `database.py` - PostgreSQL database layer (asyncpg)
-- `database_connection.py` - Connection pooling and lifecycle
-- `orchestrator.py` - Async session management
-- `api/main.py` - FastAPI with PostgreSQL backend
+- `server/database/operations.py` - PostgreSQL database layer (asyncpg)
+- `server/database/connection.py` - Connection pooling and lifecycle
+- `server/database/retry.py` - Retry logic with exponential backoff
+- `server/agent/orchestrator.py` - Async session management
+- `server/api/app.py` - FastAPI with PostgreSQL backend
 - UUID-based project identification
 - JSONB for flexible metadata
 - Connection pooling (10-20 connections)
+- Production hardening (retry logic, intervention system, checkpointing)
 
 ## Resources
 

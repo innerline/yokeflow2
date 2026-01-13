@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4, UUID
 from datetime import datetime
 
-from core.session_manager import PausedSessionManager, AutoRecoveryManager
-from core.intervention import InterventionManager
+from server.agent.session_manager import PausedSessionManager, AutoRecoveryManager
+from server.agent.intervention import InterventionManager
 
 
 class TestPausedSessionManager:
@@ -32,7 +32,7 @@ class TestPausedSessionManager:
         project_id = str(uuid4())
 
         # Mock the database
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -74,7 +74,7 @@ class TestPausedSessionManager:
             "message": "Test error message"
         }]
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -111,7 +111,7 @@ class TestPausedSessionManager:
             "description": "Implement feature X"
         }
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -144,7 +144,7 @@ class TestPausedSessionManager:
         project_id = uuid4()
 
         # Mock database responses
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -199,7 +199,7 @@ class TestPausedSessionManager:
 
         paused_session_id = str(uuid4())
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -216,7 +216,7 @@ class TestPausedSessionManager:
 
         paused_session_id = str(uuid4())
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -241,7 +241,7 @@ class TestPausedSessionManager:
             {"id": str(uuid4()), "project_name": "Project 2"}
         ]
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -263,7 +263,7 @@ class TestPausedSessionManager:
             {"id": str(uuid4()), "project_id": project_id, "project_name": "Project 1"}
         ]
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -289,7 +289,7 @@ class TestPausedSessionManager:
             {"id": str(uuid4()), "resolved_at": datetime.now().isoformat()}
         ]
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -314,7 +314,7 @@ class TestPausedSessionManager:
 
         paused_session_id = str(uuid4())
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -337,7 +337,7 @@ class TestPausedSessionManager:
 
         paused_session_id = str(uuid4())
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 
@@ -360,7 +360,7 @@ class TestPausedSessionManager:
 
         paused_session_id = str(uuid4())
 
-        with patch('core.session_manager.DatabaseManager') as MockDB:
+        with patch('server.agent.session_manager.DatabaseManager') as MockDB:
             mock_db = AsyncMock()
             MockDB.return_value.__aenter__.return_value = mock_db
 

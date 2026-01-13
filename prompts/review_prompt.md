@@ -248,6 +248,10 @@ For each issue, provide:
 
 **Impact:** [What this prevents/improves in future sessions]
 
+**Theme:** [browser_verification|docker_mode|testing|error_handling|git_commits|parallel_execution|task_management|prompt_adherence]
+
+**Confidence:** [1-10 score based on evidence strength]
+
 ---
 
 #### 2. **[Next High Priority Recommendation]**
@@ -258,13 +262,49 @@ For each issue, provide:
 
 ### Medium Priority
 
-- **[Recommendation]** - [Brief explanation]
-- **[Recommendation]** - [Brief explanation]
+#### 3. **[Medium Priority Title]**
+
+**Problem:** [Issue description]
+
+**Before:**
+```markdown
+[Current prompt excerpt]
+```
+
+**After:**
+```markdown
+[Improved prompt excerpt]
+```
+
+**Impact:** [Expected improvement]
+
+**Theme:** [categorization]
+
+**Confidence:** [1-10]
+
+---
 
 ### Low Priority
 
-- **[Nice-to-have improvement]** - [Brief explanation]
-- **[Nice-to-have improvement]** - [Brief explanation]
+#### 4. **[Low Priority Title]**
+
+**Problem:** [Minor issue]
+
+**Before:**
+```markdown
+[Current prompt excerpt]
+```
+
+**After:**
+```markdown
+[Improved prompt excerpt]
+```
+
+**Impact:** [Minor improvement]
+
+**Theme:** [categorization]
+
+**Confidence:** [1-10]
 
 ---
 
@@ -275,3 +315,29 @@ For each issue, provide:
 ## IMPORTANT: End with RECOMMENDATIONS
 
 **Do NOT add a "Summary" section at the end.** The Executive Summary at the beginning is sufficient. End your review with the RECOMMENDATIONS section above.
+
+---
+
+## STRUCTURED DATA EXTRACTION
+
+After generating the markdown review above, also provide structured recommendations in the following JSON format for database storage (this will be automatically extracted and stored in the `prompt_improvements` JSONB field):
+
+```json
+{
+  "structured_recommendations": [
+    {
+      "title": "Recommendation Title",
+      "priority": "HIGH|MEDIUM|LOW",
+      "theme": "browser_verification|docker_mode|testing|error_handling|git_commits|parallel_execution|task_management|prompt_adherence|general",
+      "problem": "Detailed problem description with evidence from session",
+      "current_text": "The exact current prompt text that needs improvement (if applicable)",
+      "proposed_text": "The complete improved prompt text with all changes",
+      "impact": "Expected improvement in future sessions",
+      "confidence": 8,
+      "evidence": ["Session event or metric supporting this recommendation"]
+    }
+  ]
+}
+```
+
+**Note:** Generate both the markdown review (for human reading) AND the JSON structured data (for automated processing). The structured data enables prompt improvement aggregation across sessions.

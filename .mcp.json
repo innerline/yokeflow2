@@ -15,7 +15,7 @@
         "./mcp-task-manager/dist/index.js"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://agent:agentpass@localhost:5432/autonomous_coding",
+        "DATABASE_URL": "postgresql://agent:agent_dev_password@localhost:5432/yokeflow",
         "PROJECT_ID": "example-project-id"
       }
     }
