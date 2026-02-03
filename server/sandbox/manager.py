@@ -115,12 +115,12 @@ class LocalSandbox(Sandbox):
     async def start(self) -> None:
         """No-op for local sandbox."""
         self.is_running = True
-        logger.info(f"LocalSandbox started (no isolation) for {self.project_dir}")
+        # logger.info(f"LocalSandbox started (no isolation) for {self.project_dir}")
 
     async def stop(self) -> None:
         """No-op for local sandbox."""
         self.is_running = False
-        logger.info(f"LocalSandbox stopped for {self.project_dir}")
+        # logger.info(f"LocalSandbox stopped for {self.project_dir}")
 
     async def execute_command(self, command: str, timeout: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -236,20 +236,20 @@ class DockerSandbox(Sandbox):
             existing_container = None
             try:
                 existing_container = self.client.containers.get(self.container_name)
-                logger.info(f"Found existing container: {self.container_name}")
+                # logger.info(f"Found existing container: {self.container_name}")
             except docker.errors.NotFound:
                 logger.info(f"No existing container found for: {self.container_name}")
 
             # Decide whether to reuse or recreate
             if self.session_type == "initializer" and existing_container:
                 # Always recreate for initializer sessions (clean slate)
-                logger.info("Initializer session: Removing existing container for clean slate")
+                # logger.info("Initializer session: Removing existing container for clean slate")
                 existing_container.remove(force=True)
                 existing_container = None
             elif self.session_type == "coding" and existing_container:
                 # Reuse for coding sessions if running, restart if stopped
                 if existing_container.status == "running":
-                    logger.info("Coding session: Reusing running container (cleaning up processes)")
+                    # logger.info("Coding session: Reusing running container (cleaning up processes)")
                     self.container_id = existing_container.id
                     self.is_running = True
 
@@ -257,7 +257,7 @@ class DockerSandbox(Sandbox):
                     await self._cleanup_container()
                     return  # Container ready, skip creation
                 else:
-                    logger.info("Coding session: Restarting stopped container")
+                    # logger.info("Coding session: Restarting stopped container")
                     existing_container.start()
                     self.container_id = existing_container.id
                     self.is_running = True
@@ -351,6 +351,7 @@ class DockerSandbox(Sandbox):
 
             # Install basic dependencies in container
             await self._setup_container()
+            logger.info(f"DockerSandbox installed: {self.container_name} (ID: {self.container_id[:12]})")
 
         except Exception as e:
             logger.error(f"Failed to start Docker sandbox: {e}")
@@ -374,6 +375,7 @@ class DockerSandbox(Sandbox):
         ]
 
         for cmd in setup_commands:
+            logger.info(f"Docker installing {cmd}")
             result = await self.execute_command(cmd, timeout=120)
             if result["returncode"] != 0:
                 logger.warning(f"Setup command failed: {cmd}\n{result['stderr']}")
@@ -392,7 +394,7 @@ class DockerSandbox(Sandbox):
         if not self.container_id or not self.client:
             return
 
-        logger.info("Performing enhanced cleanup for reused container...")
+        # logger.info("Performing enhanced cleanup for reused container...")
 
         cleanup_commands = [
             # Kill all node processes (dev servers, etc.)
@@ -416,7 +418,7 @@ class DockerSandbox(Sandbox):
                 if "no process found" not in result["stderr"].lower():
                     logger.debug(f"Cleanup command: {cmd}\n{result['stderr']}")
 
-        logger.info("Container cleanup complete")
+        # logger.info("Container cleanup complete")
 
     async def stop(self) -> None:
         """
@@ -608,14 +610,14 @@ class SandboxManager:
             # Try to get and stop the container
             try:
                 container = client.containers.get(container_name)
-                logger.info(f"Found Docker container: {container_name}, status: {container.status}")
+                # logger.info(f"Found Docker container: {container_name}, status: {container.status}")
 
                 if container.status == 'running':
                     container.stop(timeout=10)
-                    logger.info(f"Successfully stopped Docker container: {container_name}")
+                    # logger.info(f"Successfully stopped Docker container: {container_name}")
                     return True
                 else:
-                    logger.info(f"Docker container {container_name} is already stopped (status: {container.status})")
+                    # logger.info(f"Docker container {container_name} is already stopped (status: {container.status})")
                     return False
             except docker.errors.NotFound:
                 logger.debug(f"No Docker container found with name: {container_name}")
@@ -665,14 +667,14 @@ class SandboxManager:
             # Try to get and start the container
             try:
                 container = client.containers.get(container_name)
-                logger.info(f"Found Docker container: {container_name}, status: {container.status}")
+                # logger.info(f"Found Docker container: {container_name}, status: {container.status}")
 
                 if container.status != 'running':
                     container.start()
-                    logger.info(f"Successfully started Docker container: {container_name}")
+                    # logger.info(f"Successfully started Docker container: {container_name}")
                     return True
                 else:
-                    logger.info(f"Docker container {container_name} is already running")
+                    # logger.info(f"Docker container {container_name} is already running")
                     return False
             except docker.errors.NotFound:
                 logger.debug(f"No Docker container found with name: {container_name}")
@@ -768,7 +770,7 @@ class SandboxManager:
             # Try to get and remove the container
             try:
                 container = client.containers.get(container_name)
-                logger.info(f"Found Docker container: {container_name}, status: {container.status}")
+                # logger.info(f"Found Docker container: {container_name}, status: {container.status}")
                 container.remove(force=True)  # force=True stops and removes
                 logger.info(f"Successfully deleted Docker container: {container_name}")
                 return True

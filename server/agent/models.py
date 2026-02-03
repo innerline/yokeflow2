@@ -19,6 +19,7 @@ class SessionStatus(Enum):
     COMPLETED = "completed"  # Session finished successfully
     ERROR = "error"  # Session encountered an error
     INTERRUPTED = "interrupted"  # Session was interrupted (Ctrl+C)
+    BLOCKED = "blocked"  # Session blocked due to epic test failure (intervention required)
 
 
 class SessionType(Enum):

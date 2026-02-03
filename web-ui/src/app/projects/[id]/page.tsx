@@ -624,7 +624,7 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Progress Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-800 rounded-lg p-4">
           <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">
             {progress.completed_epics}/{progress.total_epics}
@@ -653,13 +653,26 @@ export default function ProjectDetailPage() {
 
         <div className="bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-800 rounded-lg p-4">
           <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-            {progress.passing_tests}/{progress.total_tests}
+            {progress.passing_epic_tests || 0}/{progress.total_epic_tests || 0}
           </div>
-          <div className="text-xs text-gray-700 dark:text-gray-500 mb-3">Tests Passing</div>
+          <div className="text-xs text-gray-700 dark:text-gray-500 mb-3">Epic Tests Passing</div>
           <ProgressBar
-            value={progress.test_pass_pct}
+            value={progress.total_epic_tests ? (progress.passing_epic_tests || 0) / progress.total_epic_tests * 100 : 0}
             className="h-2"
-            color={progress.test_pass_pct === 100 ? 'green' : progress.test_pass_pct > 0 ? 'yellow' : 'red'}
+            color={progress.passing_epic_tests === progress.total_epic_tests ? 'green' : progress.passing_epic_tests ? 'yellow' : 'red'}
+            showPercentage={false}
+          />
+        </div>
+
+        <div className="bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-800 rounded-lg p-4">
+          <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">
+            {progress.passing_task_tests || progress.passing_tests}/{progress.total_task_tests || progress.total_tests}
+          </div>
+          <div className="text-xs text-gray-700 dark:text-gray-500 mb-3">Task Tests Passing</div>
+          <ProgressBar
+            value={progress.total_task_tests ? (progress.passing_task_tests || 0) / progress.total_task_tests * 100 : progress.test_pass_pct}
+            className="h-2"
+            color={progress.passing_task_tests === progress.total_task_tests ? 'green' : progress.passing_task_tests ? 'yellow' : 'red'}
             showPercentage={false}
           />
         </div>

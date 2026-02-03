@@ -24,51 +24,19 @@ def load_prompt(name: str) -> str:
     return prompt_path.read_text()
 
 
-def get_sandbox_preamble(sandbox_type: str = "local") -> str:
-    """
-    Load sandbox-specific preamble for tool selection guidance.
+def get_initializer_prompt() -> str:
+    """    Load the initializer prompt.
 
-    DEPRECATED: Use get_initializer_prompt() or get_coding_prompt() instead.
-    This function is kept for backward compatibility only.
-
-    Args:
-        sandbox_type: "docker" or "local" (default: "local")
-
-    Returns:
-        Preamble content as string
-    """
-    if sandbox_type == "docker":
-        preamble_path = PROMPTS_DIR / "preambles" / "docker_sandbox.md"
-    else:
-        preamble_path = PROMPTS_DIR / "preambles" / "local_sandbox.md"
-
-    if preamble_path.exists():
-        return preamble_path.read_text()
-    else:
-        # Fallback for backward compatibility
-        return ""
-
-
-def get_initializer_prompt(sandbox_type: str = "local") -> str:
-    """
-    Load the initializer prompt for the specified sandbox type.
-
-    Prompts are now split by sandbox type into separate files:
-    - local: prompts/initializer_prompt_local.md
-    - docker: prompts/initializer_prompt_docker.md
-
-    Args:
-        sandbox_type: "docker" or "local" (default: "local")
+    The initializer prompt is now unified - it works the same regardless
+    of sandbox type since it only creates files and directories (no server
+    operations).
 
     Returns:
         Complete initializer prompt content as string
     """
-    if sandbox_type == "docker":
-        prompt_name = "initializer_prompt_docker"
-    else:
-        prompt_name = "initializer_prompt_local"
 
-    return load_prompt(prompt_name)
+    # Use the unified initializer prompt regardless of sandbox type
+    return load_prompt("initializer_prompt")
 
 
 def get_coding_prompt(sandbox_type: str = "local") -> str:

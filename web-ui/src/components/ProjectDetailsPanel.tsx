@@ -16,7 +16,7 @@ import { EnvEditor } from './EnvEditor';
 import { EpicAccordion } from './EpicAccordion';
 import { TaskDetailModal } from './TaskDetailModal';
 import { api } from '@/lib/api';
-import type { Epic, TaskWithTestCount, Project } from '@/lib/types';
+import type { Epic, TaskWithTestCount, Project, EpicTest, EpicWithTasks } from '@/lib/types';
 
 interface ProjectDetailsPanelProps {
   projectId: string;
@@ -38,6 +38,7 @@ export function ProjectDetailsPanel({
   // Epics state
   const [epics, setEpics] = useState<Epic[]>([]);
   const [epicTasks, setEpicTasks] = useState<Record<number, TaskWithTestCount[]>>({});
+  const [epicTests, setEpicTests] = useState<Record<number, EpicTest[]>>({});
   const [epicsLoading, setEpicsLoading] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -55,18 +56,27 @@ export function ProjectDetailsPanel({
       const epicsData = await api.listEpics(projectId);
       setEpics(epicsData);
 
-      // Load tasks for each epic
-      const tasksPromises = epicsData.map(async (epic) => {
-        const epicDetail = await api.getEpic(projectId, epic.id);
-        return { epicId: epic.id, tasks: epicDetail.tasks };
+      // Load tasks and epic tests for each epic
+      const detailsPromises = epicsData.map(async (epic) => {
+        const epicDetail = await api.getEpic(projectId, epic.id) as EpicWithTasks;
+        return {
+          epicId: epic.id,
+          tasks: epicDetail.tasks,
+          epic_tests: epicDetail.epic_tests || []
+        };
       });
 
-      const tasksResults = await Promise.all(tasksPromises);
+      const detailsResults = await Promise.all(detailsPromises);
       const tasksMap: Record<number, TaskWithTestCount[]> = {};
-      tasksResults.forEach(({ epicId, tasks }) => {
+      const testsMap: Record<number, EpicTest[]> = {};
+
+      detailsResults.forEach(({ epicId, tasks, epic_tests }) => {
         tasksMap[epicId] = tasks;
+        testsMap[epicId] = epic_tests;
       });
+
       setEpicTasks(tasksMap);
+      setEpicTests(testsMap);
     } catch (err) {
       console.error('Failed to load epics:', err);
       toast.error('Failed to load epics');
@@ -232,6 +242,7 @@ export function ProjectDetailsPanel({
                       key={epic.id}
                       epic={epic}
                       tasks={epicTasks[epic.id] || []}
+                      epicTests={epicTests[epic.id] || []}
                       onTaskClick={(taskId) => {
                         setSelectedTaskId(taskId);
                         setShowTaskModal(true);

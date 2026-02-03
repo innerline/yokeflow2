@@ -10,28 +10,6 @@ This directory contains command-line tools for managing YokeFlow projects, debug
 
 ## Development & Debugging Tools
 
-### [task_status.py](task_status.py)
-View real-time task progress and status for any project.
-
-**Usage:**
-```bash
-python scripts/task_status.py [project_name_or_id]
-python scripts/task_status.py --list          # List all projects
-```
-
-**Features:**
-- Overall progress (epics, tasks, tests)
-- Per-epic breakdown with completion percentages
-- Task details with pass/fail test counts
-- Rich terminal UI with progress bars
-
-**Use when:**
-- Monitoring agent progress from command line
-- Debugging task completion issues
-- Quick status checks without opening Web UI
-
----
-
 ### [analyze_sessions.py](analyze_sessions.py)
 Analyze agent sessions from the database with detailed metrics.
 
@@ -53,36 +31,6 @@ python scripts/analyze_sessions.py --all      # Analyze all projects
 - Identifying session patterns
 - Analyzing token usage across projects
 - Debugging session failures
-
----
-
-### [reset_project.py](reset_project.py)
-Reset a project to post-initialization state without re-running the time-consuming initialization.
-
-**Usage:**
-```bash
-python scripts/reset_project.py --project-dir my-project
-python scripts/reset_project.py --project-dir my-project --yes     # Skip confirmation
-python scripts/reset_project.py --project-dir my-project --dry-run # Preview changes
-```
-
-**What gets reset:**
-- Database: Task/test completion status, session records
-- Git: Resets to commit after initialization
-- Logs: Archives to `logs/old_attempts/TIMESTAMP/`
-
-**What is preserved:**
-- Complete roadmap (epics, tasks, tests)
-- Initialization session and setup
-- Project structure and configuration
-
-**Use when:**
-- Testing prompt improvements (faster iteration)
-- Debugging coding session behavior
-- A/B testing different models
-- Recovering from early-stage issues
-
-**Benefits:** Saves 10-20 minutes per iteration vs. full reinitialization
 
 ---
 
@@ -223,52 +171,6 @@ Configure macOS to prevent sleep and Docker throttling during long autonomous se
 
 ---
 
-## Quality & Review Tools
-
-### [check_deep_reviews.py](check_deep_reviews.py)
-Check if deep reviews exist in the database and inspect their contents.
-
-**Usage:**
-```bash
-python scripts/check_deep_reviews.py
-```
-
-**Features:**
-- Counts total deep reviews
-- Shows latest 5 reviews with ratings
-- Displays prompt improvements
-- Verifies review text presence
-
-**Use when:**
-- Debugging review system
-- Verifying deep reviews are being created
-- Inspecting review quality and recommendations
-- Troubleshooting quality dashboard issues
-
----
-
-### [show_review_recommendations.py](show_review_recommendations.py)
-Extract and display the RECOMMENDATIONS section from the latest deep review.
-
-**Usage:**
-```bash
-python scripts/show_review_recommendations.py
-```
-
-**Features:**
-- Shows latest deep review recommendations
-- Extracts actionable improvements
-- Displays project and session context
-- Formats for easy reading
-
-**Use when:**
-- Quick access to latest recommendations
-- Reviewing prompt improvement suggestions
-- Debugging review content
-- Verifying recommendation quality
-
----
-
 ## Database Tools
 
 ### [init_database.py](init_database.py)
@@ -300,30 +202,15 @@ python scripts/init_database.py --url postgresql://...      # Custom URL
 
 ### Common Workflows
 
-**Monitor a running session:**
-```bash
-python scripts/task_status.py my-project
-```
-
 **Clean up after system sleep:**
 ```bash
 python scripts/cleanup_sessions.py
-```
-
-**Iterate on prompts without full reinitialization:**
-```bash
-python scripts/reset_project.py --project-dir my-project
 ```
 
 **Prepare for overnight run:**
 ```bash
 ./scripts/setup-macos-for-long-runs.sh
 ./scripts/docker-watchdog.sh &
-```
-
-**Review latest agent recommendations:**
-```bash
-python scripts/show_review_recommendations.py
 ```
 
 **Manage project Docker services:**

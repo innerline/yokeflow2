@@ -1,13 +1,33 @@
 # Deployment Guide - Digital Ocean
 
-**Last Updated:** December 30, 2025
-**Status:** ✅ Deployment Verified - Application Testing Needed
+**Last Updated:** February 2, 2026
+**Version:** 2.1.0
+**Status:** ⚠️ Deployment Not Tested for v2.1
 
 > **📋 DEPLOYMENT STATUS:**
 >
-> This deployment guide has been **successfully tested** with YokeFlow v1.2.0 on Digital Ocean (December 30, 2025).
+> **⚠️ IMPORTANT NOTICE - v2.1.0:**
+> This deployment guide was last verified with **v2.0.0 (December 2025)**.
 >
-> **Current Status:**
+> **YokeFlow v2.1.0 (February 2026)** has NOT been tested on Digital Ocean and includes significant changes:
+> - 7 new database migrations (017-020+)
+> - 60+ API endpoints (was 17)
+> - 20+ MCP tools (was 15)
+> - Enhanced quality system (8 phases)
+> - Project completion review system
+> - Epic re-testing infrastructure
+>
+> **If deploying v2.1.0, expect:**
+> - Database migrations may require manual intervention
+> - Additional testing needed for quality system endpoints
+> - MCP tool compatibility verification required
+> - Increased resource usage (more complex workflows)
+>
+> **Recommendation:** Test v2.1.0 deployment locally before production deployment.
+>
+> ---
+>
+> **v2.0.0 Deployment Status (Last Verified: December 30, 2025):**
 > - ✅ Deployment steps verified and working on Digital Ocean
 > - ✅ All services start successfully (PostgreSQL, API, Web UI)
 > - ✅ Database initialization works (manual step required - see Phase 5)
@@ -17,24 +37,65 @@
 > - ✅ Project initialization confirmed working (Session 0 starts)
 > - ⚠️ **Full application workflow not thoroughly tested** (complete coding sessions, reviews, etc.)
 >
-> **Known Issues (Resolved):**
+> **v2.0.0 Known Issues (Resolved):**
 > - ✅ Database schema auto-initialization may fail silently on first run
 >   - **Solution:** Manually run schema.sql as documented in Phase 5
 > - ✅ Docker image name mismatch (yokeflow-sandbox vs yokeflow-playwright)
 >   - **Solution:** Build as yokeflow-playwright:latest as documented in Phase 7
 >
-> **Testing Needed:**
+> **v2.0.0 Testing Needed:**
 > - Complete coding sessions (Sessions 1+) with real applications
 > - Browser verification with Playwright in production
 > - WebSocket real-time updates during sessions
 > - Quality review system end-to-end
 > - Multi-project concurrent execution
 >
-> If you encounter issues with application functionality, please report them via GitHub Issues.
+> If you encounter issues, please report them via [GitHub Issues](https://github.com/anthropics/yokeflow/issues).
 
 ---
 
-**Recent Updates (December 2025):**
+## What's New in v2.1.0 (February 2026)
+
+**⚠️ These features have NOT been tested in production deployment:**
+
+### Quality System (8 Phases)
+- **Phase 0**: Database cleanup - Removed 34 unused objects
+- **Phase 1**: Test execution tracking - Error messages, execution time, retry counts
+- **Phase 2**: Epic test failure tracking - 22-field history, flaky test detection
+- **Phase 3**: Epic test blocking - Strict/autonomous modes
+- **Phase 4.1**: Test viewer UI - Epic/task tests visible
+- **Phase 5**: Epic re-testing - Smart selection, regression detection, stability scoring
+- **Phase 6**: Enhanced review triggers - 7 quality-based conditions
+- **Phase 7**: Project completion review - Spec parser, requirement matcher, Claude review
+- **Phase 8**: Prompt improvement aggregation (60% complete)
+
+### Database Changes
+- 7 new migrations (017-020+)
+- 4 new quality system tables
+- 5+ new views for analytics
+- Enhanced test tracking fields
+
+### API Expansion
+- 60+ REST API endpoints (was 17)
+- 5 new endpoint groups (completion reviews, interventions, containers, etc.)
+- Enhanced input validation (19 Pydantic models)
+
+### MCP Tools
+- 20+ MCP tools (was 15)
+- 5 new quality system tools
+- Enhanced test result tracking
+
+### Configuration
+- 4 new configuration sections in `.yokeflow.yaml`
+- Epic testing modes (strict/autonomous)
+- Epic re-testing configuration
+- Review system settings
+
+**For complete details, see [QUALITY_SYSTEM_SUMMARY.md](../QUALITY_SYSTEM_SUMMARY.md)**
+
+---
+
+**v2.0.0 Updates (December 2025):**
 - ✅ JWT Authentication implemented (backend + frontend)
 - ✅ UI Login page with password protection
 - ✅ Project name validation (no spaces allowed)
@@ -204,6 +265,14 @@ The deployment server (Digital Ocean Droplet) requires:
 ---
 
 ## Deployment Steps
+
+> **⚠️ v2.1.0 Note:** These deployment steps were verified for v2.0.0. For v2.1.0:
+> 1. All steps below still apply
+> 2. Additional database migrations will run automatically (017-020+)
+> 3. Test all quality system features after deployment
+> 4. Monitor resource usage (v2.1 may require more resources)
+> 5. Verify all 60+ API endpoints are accessible
+> 6. Consider increasing Droplet size if needed (16GB RAM recommended for v2.1)
 
 ### Phase 1: Create Droplet
 

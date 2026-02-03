@@ -227,10 +227,12 @@ export function TaskDetailModal({ projectId, taskId, isOpen, onClose }: TaskDeta
 // Test item component
 function TestItem({ test, getCategoryColor }: { test: Test; getCategoryColor: (category: string) => string }) {
   const [expanded, setExpanded] = useState(false);
+  const [showTestCode, setShowTestCode] = useState(false);
 
   // Parse steps if they're a JSON string
   const steps = typeof test.steps === 'string' ? JSON.parse(test.steps || '[]') : test.steps || [];
   const hasSteps = Array.isArray(steps) && steps.length > 0;
+  const hasTestCode = test.test_code && test.test_code.trim().length > 0;
 
   return (
     <div className="bg-gray-800/50 rounded-lg border border-gray-700/50 overflow-hidden">
@@ -258,22 +260,56 @@ function TestItem({ test, getCategoryColor }: { test: Test; getCategoryColor: (c
               <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getCategoryColor(test.category)}`}>
                 {test.category}
               </span>
+              {test.test_type && (
+                <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                  test.test_type === 'unit' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                  test.test_type === 'api' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                  test.test_type === 'browser' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
+                  test.test_type === 'database' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                  'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                }`}>
+                  {test.test_type}
+                </span>
+              )}
               {test.passes === true && (
                 <span className="text-xs text-green-400 font-medium">Passed</span>
               )}
               {test.passes === false && (
                 <span className="text-xs text-red-400 font-medium">Failed</span>
               )}
-              {test.passes === null && (
+              {test.passes === null && test.last_result && (
+                <span className={`text-xs font-medium ${
+                  test.last_result === 'passed' ? 'text-green-400' :
+                  test.last_result === 'failed' ? 'text-red-400' :
+                  test.last_result === 'skipped' ? 'text-yellow-400' :
+                  'text-gray-500'
+                }`}>
+                  {test.last_result.charAt(0).toUpperCase() + test.last_result.slice(1)}
+                </span>
+              )}
+              {test.passes === null && !test.last_result && (
                 <span className="text-xs text-gray-500 font-medium">Not Run</span>
               )}
             </div>
             <p className="text-sm text-gray-200">{test.description}</p>
-            {hasSteps && (
-              <p className="text-xs text-gray-500 mt-2">
-                {expanded ? '▼' : '▶'} {steps.length} step{steps.length !== 1 ? 's' : ''} {expanded ? '(click to collapse)' : '(click to expand)'}
-              </p>
-            )}
+            <div className="flex items-center gap-4 mt-2">
+              {hasSteps && (
+                <p className="text-xs text-gray-500">
+                  {expanded ? '▼' : '▶'} {steps.length} step{steps.length !== 1 ? 's' : ''} {expanded ? '(click to collapse)' : '(click to expand)'}
+                </p>
+              )}
+              {hasTestCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTestCode(!showTestCode);
+                  }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  {showTestCode ? 'Hide' : 'Show'} test code
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -288,6 +324,24 @@ function TestItem({ test, getCategoryColor }: { test: Test; getCategoryColor: (c
                 </li>
               ))}
             </ol>
+          </div>
+        )}
+
+        {/* Test Code Section */}
+        {showTestCode && hasTestCode && (
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <h4 className="text-xs font-medium text-gray-400 mb-2">Test Code:</h4>
+            <pre className="bg-gray-950 rounded p-3 text-xs text-gray-300 overflow-x-auto">
+              <code>{test.test_code}</code>
+            </pre>
+            {test.execution_log && (
+              <div className="mt-3">
+                <h4 className="text-xs font-medium text-gray-400 mb-2">Last Execution Log:</h4>
+                <pre className="bg-gray-950/50 rounded p-3 text-xs text-gray-400 overflow-x-auto max-h-32 overflow-y-auto">
+                  <code>{test.execution_log}</code>
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </div>

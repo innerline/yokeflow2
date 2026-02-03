@@ -31,7 +31,7 @@ import tempfile
 import shutil
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File, Form, Body, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -96,6 +96,15 @@ from server.api.validation import (
     validate_spec_file_content,
     validate_project_name
 )
+
+# Import generation modules
+from server.generation import (
+    SpecValidator,
+    ContextManager,
+    ContextManifest
+)
+# Use the new SDK-based spec generator
+from server.generation.spec_generator_v2 import SpecGenerator
 
 # Use structured logging
 logger = get_logger(__name__)
@@ -240,7 +249,7 @@ async def lifespan(app: FastAPI):
                 logger.error(f"Error in periodic cleanup: {e}")
 
     cleanup_task = asyncio.create_task(periodic_cleanup())
-    logger.info("Started periodic stale session cleanup (every 5 minutes)")
+    # logger.info("Started periodic stale session cleanup (every 5 minutes)")
 
     yield
 
@@ -319,16 +328,32 @@ running_sessions: Dict[str, asyncio.Task] = {}
 # Helper function to convert datetime fields
 def convert_datetimes_to_str(data: Dict[str, Any], fields: List[str] = None) -> Dict[str, Any]:
     """Convert datetime fields to ISO format strings for JSON serialization."""
+    import uuid
+    from datetime import datetime
+    from decimal import Decimal
+    
     if fields is None:
-        fields = ['created_at', 'updated_at', 'started_at', 'ended_at', 'env_configured_at', 'completed_at']
+        fields = ['created_at', 'updated_at', 'started_at', 'ended_at', 'env_configured_at', 'completed_at', 'verified_at']
 
-    for field in fields:
-        if field in data and data[field]:
-            if hasattr(data[field], 'isoformat'):
-                data[field] = data[field].isoformat()
+    # Handle nested dictionaries and lists recursively
+    if isinstance(data, dict):
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                result[key] = convert_datetimes_to_str(value, fields)
+            elif isinstance(value, uuid.UUID):
+                result[key] = str(value)
+            elif isinstance(value, datetime) and (key in fields or key.endswith('_at')):
+                result[key] = value.isoformat()
+            elif isinstance(value, Decimal):
+                result[key] = float(value)
             else:
-                data[field] = str(data[field])
-    return data
+                result[key] = value
+        return result
+    elif isinstance(data, list):
+        return [convert_datetimes_to_str(item, fields) for item in data]
+    else:
+        return data
 
 
 # =============================================================================
@@ -418,7 +443,7 @@ async def health_check():
         overall_status = "unhealthy"
 
     # Check MCP server (quick check if build exists)
-    mcp_path = Path(__file__).parent.parent / "mcp-task-manager" / "dist"
+    mcp_path = Path(__file__).parent.parent.parent / "mcp-task-manager" / "dist"
     if mcp_path.exists():
         checks["mcp_server"] = {
             "status": "healthy",
@@ -623,6 +648,127 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
 
 
 # =============================================================================
+# Specification Generation Endpoints
+# =============================================================================
+
+@app.post("/api/generate-spec")
+async def generate_spec(request: Request):
+    """
+    Generate an application specification from natural language description.
+
+    Uses Server-Sent Events (SSE) to stream the generation progress.
+
+    Request body:
+        {
+            "description": "Natural language description of the application",
+            "project_name": "Name of the project",
+            "context_files": [{"name": "file.txt", "summary": "..."}]  # Optional
+        }
+
+    Returns:
+        SSE stream with generation progress and final specification
+    """
+    try:
+        body = await request.json()
+        description = body.get("description")
+        project_name = body.get("project_name", "my_app")
+        context_files = body.get("context_files", [])
+
+        if not description:
+            raise HTTPException(status_code=400, detail="Description is required")
+
+        # Initialize spec generator
+        spec_generator = SpecGenerator()
+
+        async def generate():
+            """Generate specification with SSE streaming."""
+            try:
+                # Send initial event
+                yield f"data: {json.dumps({'event': 'start', 'message': 'Starting specification generation...'})}\n\n"
+
+                # Stream the specification
+                full_spec = ""
+                async for chunk in spec_generator.generate_spec(
+                    description=description,
+                    project_name=project_name,
+                    context_files=context_files,
+                    stream=True
+                ):
+                    full_spec += chunk
+                    # Send progress events with chunks
+                    yield f"data: {json.dumps({'event': 'progress', 'content': chunk})}\n\n"
+
+                # Send completion event
+                yield f"data: {json.dumps({'event': 'complete', 'specification': full_spec})}\n\n"
+
+            except Exception as e:
+                logger.error(f"Error generating specification: {str(e)}")
+                yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error in generate_spec endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/validate-spec")
+async def validate_spec(request: Request):
+    """
+    Validate a markdown specification for required sections.
+
+    Request body:
+        {
+            "spec_content": "Markdown content of the specification"
+        }
+
+    Returns:
+        {
+            "valid": bool,
+            "errors": ["list of errors"],
+            "warnings": ["list of warnings"],
+            "sections_found": ["list of found sections"],
+            "sections_missing": ["list of missing sections"],
+            "suggestions": ["list of improvement suggestions"]
+        }
+    """
+    try:
+        body = await request.json()
+        spec_content = body.get("spec_content")
+
+        if not spec_content:
+            raise HTTPException(status_code=400, detail="Specification content is required")
+
+        # Validate the specification
+        validator = SpecValidator()
+        result = validator.validate(spec_content)
+
+        # Add improvement suggestions
+        suggestions = validator.suggest_improvements(spec_content)
+
+        return {
+            "valid": result.valid,
+            "errors": result.errors,
+            "warnings": result.warnings,
+            "sections_found": result.sections_found,
+            "sections_missing": result.sections_missing,
+            "suggestions": suggestions
+        }
+
+    except Exception as e:
+        logger.error(f"Error validating specification: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Helper Functions
 # =============================================================================
 
@@ -656,7 +802,7 @@ async def _handle_multi_file_upload(
             content = await file.read()
             file_path.write_bytes(content)
 
-        logger.info(f"Saved {len(spec_files)} spec files to {temp_dir}")
+        # logger.info(f"Saved {len(spec_files)} spec files to {temp_dir}")
         return temp_dir
 
     except Exception as e:
@@ -665,6 +811,55 @@ async def _handle_multi_file_upload(
         logger.error(f"Failed to save multi-file upload: {e}")
         raise
 
+
+# =============================================================================
+# Helper Functions for Data Normalization
+# =============================================================================
+
+def normalize_progress_fields(progress: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize progress field names for backward compatibility.
+    Maps new database column names to expected frontend field names.
+    """
+    if not progress:
+        return progress
+
+    # Convert all Decimal fields to float
+    from decimal import Decimal
+    for key, value in list(progress.items()):
+        if isinstance(value, Decimal):
+            progress[key] = float(value)
+
+    # Map new column names to expected names for backward compatibility
+    column_mapping = {
+        'epics_total': 'total_epics',
+        'epics_completed': 'completed_epics',
+        'tasks_total': 'total_tasks',
+        'tasks_completed': 'completed_tasks',
+        'task_tests_total': 'total_task_tests',
+        'task_tests_passing': 'passing_task_tests',
+        'epic_tests_total': 'total_epic_tests',
+        'epic_tests_passing': 'passing_epic_tests',
+        'task_test_pass_pct': 'test_pass_pct'
+    }
+
+    # Apply the mapping
+    for old_name, new_name in column_mapping.items():
+        if old_name in progress:
+            progress[new_name] = progress.pop(old_name)
+
+    # Calculate combined totals for backward compatibility
+    progress['total_tests'] = progress.get('total_task_tests', 0) + progress.get('total_epic_tests', 0)
+    progress['passing_tests'] = progress.get('passing_task_tests', 0) + progress.get('passing_epic_tests', 0)
+
+    # Ensure test_pass_pct exists (avoid NaN in frontend)
+    if 'test_pass_pct' not in progress:
+        if progress.get('total_tests', 0) > 0:
+            progress['test_pass_pct'] = (progress.get('passing_tests', 0) / progress['total_tests']) * 100
+        else:
+            progress['test_pass_pct'] = 0
+
+    return progress
 
 # =============================================================================
 # Project Endpoints
@@ -683,6 +878,10 @@ async def list_projects(current_user: dict = Depends(get_current_user)):
             project_dict = dict(p)
             project_dict['id'] = str(project_dict.get('id', ''))
             project_dict = convert_datetimes_to_str(project_dict)
+
+            # Normalize progress field names for frontend compatibility
+            if 'progress' in project_dict:
+                project_dict['progress'] = normalize_progress_fields(project_dict['progress'])
 
             # Extract sandbox_type from metadata to top level
             metadata = project_dict.get('metadata', {})
@@ -793,6 +992,10 @@ async def get_project(project_id: str, current_user: dict = Depends(get_current_
         project_dict['id'] = str(project_dict.get('id', ''))
         project_dict = convert_datetimes_to_str(project_dict)
 
+        # Normalize progress field names for frontend compatibility
+        if 'progress' in project_dict:
+            project_dict['progress'] = normalize_progress_fields(project_dict['progress'])
+
         # Extract sandbox_type from metadata to top level
         metadata = project_dict.get('metadata', {})
         if isinstance(metadata, str):
@@ -824,14 +1027,38 @@ async def delete_project(project_id: str):
         project_uuid = UUID(project_id)
 
         # Delete the project
-        await orchestrator.delete_project(project_uuid)
+        result = await orchestrator.delete_project(project_uuid)
 
-        return {"message": f"Project {project_id} deleted successfully"}
+        # Check if there were any issues
+        message = f"Project {project_id} deleted successfully"
+        status = "success"
+
+        # The orchestrator logs warnings if some files couldn't be deleted
+        # but still returns True if the database was cleaned
+        if result:
+            logger.info(f"Project {project_id} deleted (check logs for any file permission warnings)")
+
+        return {
+            "message": message,
+            "status": status,
+            "project_id": project_id,
+            "note": "Database records deleted. Check logs if file deletion had permission issues."
+        }
     except ValueError as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
         else:
             raise HTTPException(status_code=400, detail="Invalid project ID format")
+    except PermissionError as e:
+        # Handle permission errors specifically
+        logger.error(f"Permission error deleting project {project_id}: {e}")
+        return {
+            "message": f"Project {project_id} database records deleted, but some files could not be removed",
+            "status": "partial",
+            "project_id": project_id,
+            "error": str(e),
+            "note": "Database cleaned. Manual cleanup may be needed for project files."
+        }
     except Exception as e:
         logger.error(f"Failed to delete project {project_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1028,14 +1255,8 @@ async def get_project_progress(project_id: str):
         project_uuid = UUID(project_id)
         async with DatabaseManager() as db:
             progress = await db.get_progress(project_uuid)
-
-            # Convert Decimal values to float for JSON serialization
-            if 'task_completion_pct' in progress:
-                progress['task_completion_pct'] = float(progress['task_completion_pct'])
-            if 'test_pass_pct' in progress:
-                progress['test_pass_pct'] = float(progress['test_pass_pct'])
-
-            return progress
+            # Use the helper function for consistency
+            return normalize_progress_fields(progress)
     except Exception as e:
         logger.error(f"Failed to get progress for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1202,11 +1423,11 @@ async def update_task(task_id: int, update_data: Dict[str, Any] = Body(...)):
 async def get_epic_detail(project_id: str, epic_id: int):
     """Get detailed epic information including all tasks."""
     try:
-        logger.info(f"Getting epic detail for project={project_id}, epic_id={epic_id}")
+        # logger.info(f"Getting epic detail for project={project_id}, epic_id={epic_id}")
         project_uuid = UUID(project_id)
         async with DatabaseManager() as db:
             epic = await db.get_epic_with_tasks(epic_id, project_uuid)
-            logger.info(f"Epic result: {epic is not None}, tasks: {len(epic.get('tasks', [])) if epic else 0}")
+            # logger.info(f"Epic result: {epic is not None}, tasks: {len(epic.get('tasks', [])) if epic else 0}")
             if not epic:
                 raise HTTPException(status_code=404, detail="Epic not found")
             return epic
@@ -2545,14 +2766,13 @@ async def websocket_endpoint(websocket: WebSocket, project_id: str):
                 if project:
                     progress = await db.get_progress(project_uuid)
 
-                    # Convert UUIDs and Decimals to JSON-serializable types
+                    # Convert UUIDs to string and normalize field names
                     if progress:
                         if 'project_id' in progress:
                             progress['project_id'] = str(progress['project_id'])
-                        # Convert Decimal to float
-                        for key in ['task_completion_pct', 'test_pass_pct']:
-                            if key in progress and progress[key] is not None:
-                                progress[key] = float(progress[key])
+
+                        # Use the helper function for consistency
+                        progress = normalize_progress_fields(progress)
 
                     # Parse metadata - asyncpg may return JSONB as string or dict
                     metadata = project.get('metadata', {})
@@ -2801,32 +3021,45 @@ async def list_screenshots(project_id: str):
             config = Config.load_default()
             generations_dir = Path(config.project.default_generations_dir)
             project_path = generations_dir / project["name"]
-            screenshots_dir = project_path / ".playwright-mcp"
 
-            if not screenshots_dir.exists():
-                return []
+            # Check both directories for backward compatibility
+            yokeflow_screenshots_dir = project_path / "yokeflow" / "screenshots"
+            legacy_screenshots_dir = project_path / ".playwright-mcp"
 
             screenshots = []
-            for filepath in screenshots_dir.glob("*.png"):
-                stat = filepath.stat()
 
-                # Try to extract task ID from filename (format: task_NNN_*.png)
-                task_id = None
-                if filepath.name.startswith("task_"):
-                    try:
-                        parts = filepath.name.split("_")
-                        if len(parts) >= 2:
-                            task_id = int(parts[1])
-                    except (ValueError, IndexError):
-                        pass
+            # Collect screenshots from both directories
+            for screenshots_dir in [yokeflow_screenshots_dir, legacy_screenshots_dir]:
+                if not screenshots_dir.exists():
+                    continue
 
-                screenshots.append({
-                    "filename": filepath.name,
-                    "size": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "task_id": task_id,
-                    "url": f"/api/projects/{project_id}/screenshots/{filepath.name}"
-                })
+                for filepath in screenshots_dir.glob("*.png"):
+                    stat = filepath.stat()
+
+                    # Try to extract task ID from filename (format: task_NNN_*.png)
+                    task_id = None
+                    if filepath.name.startswith("task_"):
+                        try:
+                            parts = filepath.name.split("_")
+                            if len(parts) >= 2:
+                                task_id = int(parts[1])
+                        except (ValueError, IndexError):
+                            pass
+
+                    # Determine the directory type for tracking
+                    if "yokeflow" in str(screenshots_dir):
+                        dir_type = "yokeflow/screenshots"
+                    else:
+                        dir_type = ".playwright-mcp"
+
+                    screenshots.append({
+                        "filename": filepath.name,
+                        "size": stat.st_size,
+                        "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "task_id": task_id,
+                        "url": f"/api/projects/{project_id}/screenshots/{filepath.name}",
+                        "directory": dir_type  # Track which directory it came from
+                    })
 
             # Sort by modified time (newest first)
             screenshots.sort(key=lambda x: x["modified_at"], reverse=True)
@@ -2858,14 +3091,25 @@ async def get_screenshot(project_id: str, filename: str):
             config = Config.load_default()
             generations_dir = Path(config.project.default_generations_dir)
             project_path = generations_dir / project["name"]
-            screenshot_path = project_path / ".playwright-mcp" / filename
 
-            # Security: Ensure the file is within the playwright directory
-            if not screenshot_path.resolve().is_relative_to((project_path / ".playwright-mcp").resolve()):
-                raise HTTPException(status_code=403, detail="Access denied")
+            # Check both directories for the screenshot
+            yokeflow_screenshot_path = project_path / "yokeflow" / "screenshots" / filename
+            legacy_screenshot_path = project_path / ".playwright-mcp" / filename
 
-            if not screenshot_path.exists() or not screenshot_path.is_file():
+            # Try yokeflow directory first, then legacy
+            screenshot_path = None
+            if yokeflow_screenshot_path.exists() and yokeflow_screenshot_path.is_file():
+                screenshot_path = yokeflow_screenshot_path
+                allowed_parent = project_path / "yokeflow" / "screenshots"
+            elif legacy_screenshot_path.exists() and legacy_screenshot_path.is_file():
+                screenshot_path = legacy_screenshot_path
+                allowed_parent = project_path / ".playwright-mcp"
+            else:
                 raise HTTPException(status_code=404, detail="Screenshot not found")
+
+            # Security: Ensure the file is within the allowed directory
+            if not screenshot_path.resolve().is_relative_to(allowed_parent.resolve()):
+                raise HTTPException(status_code=403, detail="Access denied")
 
             # Import Response for returning binary data
             from fastapi.responses import FileResponse
@@ -2888,94 +3132,12 @@ async def get_screenshot(project_id: str, filename: str):
 # Quality Check Endpoints (Phase 1 Review System Integration)
 # =============================================================================
 
-@app.get("/api/projects/{project_id}/quality")
-async def get_project_quality(project_id: str):
-    """
-    Get overall quality summary for a project.
-
-    Returns aggregate quality metrics across all sessions.
-    """
-    try:
-        project_uuid = UUID(project_id)
-        db = await get_db()
-        summary = await db.get_project_quality_summary(project_uuid)
-        return summary
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid project ID format")
-    except Exception as e:
-        logger.error(f"Failed to get quality summary for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/projects/{project_id}/sessions/{session_id}/quality")
-async def get_session_quality(project_id: str, session_id: str):
-    """
-    Get quality check results for a specific session.
-
-    Returns quick quality check metrics and any deep review results.
-    """
-    try:
-        session_uuid = UUID(session_id)
-        db = await get_db()
-        quality = await db.get_session_quality(session_uuid)
-
-        if not quality:
-            raise HTTPException(status_code=404, detail="Quality check not found for this session")
-
-        return quality
-
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404) without wrapping
-        raise
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid session ID format")
-    except Exception as e:
-        logger.error(f"Failed to get quality for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/projects/{project_id}/quality/issues")
-async def get_quality_issues(project_id: str, limit: int = 10):
-    """
-    Get recent sessions with quality issues for a project.
-
-    Args:
-        limit: Maximum number of sessions to return (default: 10)
-    """
-    try:
-        project_uuid = UUID(project_id)
-        db = await get_db()
-        issues = await db.get_sessions_with_quality_issues(project_uuid, limit)
-        return {"issues": issues, "count": len(issues)}
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid project ID format")
-    except Exception as e:
-        logger.error(f"Failed to get quality issues for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/projects/{project_id}/quality/browser-verification")
-async def get_browser_verification_compliance(project_id: str):
-    """
-    Get browser verification compliance statistics for a project.
-
-    Returns breakdown of sessions by Playwright usage level.
-    Critical quality metric (r=0.98 correlation with session quality).
-    """
-    try:
-        project_uuid = UUID(project_id)
-        db = await get_db()
-        compliance = await db.get_browser_verification_compliance(project_uuid)
-        return compliance
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid project ID format")
-    except Exception as e:
-        logger.error(f"Failed to get browser verification compliance for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# Removed deprecated quality endpoints (session_quality_checks table no longer exists):
+# - GET /api/projects/{project_id}/quality - Returns empty data (v_project_quality view removed)
+# - GET /api/projects/{project_id}/sessions/{session_id}/quality - Returns deep reviews only
+# - GET /api/projects/{project_id}/quality/issues - Returns empty list (v_recent_quality_issues view removed)
+# - GET /api/projects/{project_id}/quality/browser-verification - Returns empty data (v_browser_verification_compliance view removed)
+# Quality metrics now stored in sessions.metrics JSONB field. Deep reviews available via /deep-reviews endpoint.
 
 @app.get("/api/projects/{project_id}/deep-reviews")
 async def list_deep_reviews(project_id: str):
@@ -3093,13 +3255,13 @@ async def trigger_deep_review(
         # Run review in background
         async def _run_review_task():
             try:
-                logger.info(f"Starting manual deep review for session {session_uuid} (project: {project_name}, session {session_number})")
+                # logger.info(f"Starting manual deep review for session {session_uuid} (project: {project_name}, session {session_number})")
                 result = await run_deep_review(
                     session_id=session_uuid,
                     project_path=project_path,
                     model=model
                 )
-                logger.info(f"Deep review completed: {result['check_id']} (rating: {result['overall_rating']}/10)")
+                # logger.info(f"Deep review completed: {result['check_id']} (rating: {result['overall_rating']}/10)")
             except Exception as e:
                 logger.error(f"Deep review failed for session {session_uuid}: {e}", exc_info=True)
 
@@ -3253,7 +3415,7 @@ async def trigger_bulk_reviews(
                         session_id=sid,
                         project_path=project_path
                     )
-                    logger.info(f"Completed deep review for session {snum}")
+                    # logger.info(f"Completed deep review for session {snum}")
 
                     # Send WebSocket notification for completed review
                     await notify_project_update(project_id, {
@@ -3491,6 +3653,196 @@ async def update_notification_preferences(
 
     except Exception as e:
         logger.error(f"Error updating notification preferences: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Completion Review Endpoints (Phase 7)
+# =============================================================================
+
+@app.get("/api/projects/{project_id}/completion-review")
+async def get_completion_review(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Get completion review for a project.
+
+    Returns the latest completion review comparing the implementation
+    against the original specification.
+    """
+    try:
+        project_uuid = UUID(project_id)
+        review = await db.get_completion_review(project_uuid)
+
+        if not review:
+            raise HTTPException(
+                status_code=404,
+                detail="No completion review found for this project"
+            )
+
+        return review
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting completion review: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/completion-review")
+async def trigger_completion_review(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Manually trigger a completion review for a project.
+
+    This is useful if you want to run a review before the project
+    is fully complete, or re-run a review after making changes.
+    """
+    try:
+        from server.quality.completion_analyzer import CompletionAnalyzer
+
+        project_uuid = UUID(project_id)
+
+        # Check if project exists
+        project = await db.get_project(project_uuid)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        logger.info(f"Manually triggering completion review for project {project_id}")
+
+        # Run analysis
+        analyzer = CompletionAnalyzer(use_semantic_matching=True)
+        review = await analyzer.analyze_completion(project_uuid, db)
+
+        # Store in database
+        review_id = await db.store_completion_review(project_uuid, review)
+
+        logger.info(
+            f"Completion review finished: {review['recommendation'].upper()} "
+            f"(score={review['overall_score']}, coverage={review['coverage_percentage']:.1f}%)"
+        )
+
+        return {
+            "review_id": str(review_id),
+            "score": review['overall_score'],
+            "coverage_percentage": review['coverage_percentage'],
+            "recommendation": review['recommendation'],
+            "requirements_met": review['requirements_met'],
+            "requirements_total": review['requirements_total'],
+            "executive_summary": review['executive_summary']
+        }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering completion review: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/completion-reviews")
+async def list_completion_reviews(
+    recommendation: Optional[str] = None,
+    min_score: Optional[int] = None,
+    limit: int = 100,
+    db=Depends(get_db)
+) -> List[Dict]:
+    """
+    List all completion reviews with optional filters.
+
+    Query parameters:
+    - recommendation: Filter by recommendation (complete/needs_work/failed)
+    - min_score: Filter by minimum score (1-100)
+    - limit: Maximum number of results (default 100)
+    """
+    try:
+        # Validate parameters
+        if recommendation and recommendation not in ['complete', 'needs_work', 'failed']:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid recommendation. Must be: complete, needs_work, or failed"
+            )
+
+        if min_score is not None and (min_score < 1 or min_score > 100):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid min_score. Must be between 1 and 100"
+            )
+
+        reviews = await db.list_completion_reviews(
+            recommendation=recommendation,
+            min_score=min_score,
+            limit=limit
+        )
+
+        return reviews
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing completion reviews: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/completion-reviews/{review_id}/requirements")
+async def get_completion_requirements(
+    review_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Get requirements grouped by section for a completion review.
+
+    Returns requirements organized by section (Frontend, Backend, etc.)
+    with their match status and implementation notes.
+    """
+    try:
+        review_uuid = UUID(review_id)
+        requirements = await db.get_completion_requirements_by_section(review_uuid)
+
+        if not requirements:
+            raise HTTPException(
+                status_code=404,
+                detail="No requirements found for this review"
+            )
+
+        return requirements
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid review ID")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting completion requirements: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/completion-reviews/{review_id}/section-summary")
+async def get_completion_section_summary(
+    review_id: str,
+    db=Depends(get_db)
+) -> List[Dict]:
+    """
+    Get section-level summary for a completion review.
+
+    Returns statistics for each section (total requirements, met count,
+    missing count, average confidence, etc.)
+    """
+    try:
+        review_uuid = UUID(review_id)
+        summary = await db.get_completion_section_summary(review_uuid)
+
+        return summary
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid review ID")
+    except Exception as e:
+        logger.error(f"Error getting section summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

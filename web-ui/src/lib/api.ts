@@ -287,6 +287,47 @@ class ApiClient {
     return response.data;
   }
 
+  // Specification Generation
+  async generateSpecification(
+    description: string,
+    contextFiles: Record<string, string>,
+    projectName?: string
+  ): Promise<{ specification: string; project_type: string }> {
+    const response = await this.client.post<{ specification: string; project_type: string }>(
+      '/api/generate-spec',
+      {
+        description,
+        context_files: contextFiles,
+        project_name: projectName
+      }
+    );
+    return response.data;
+  }
+
+  async validateSpecification(
+    specification: string,
+    projectType?: string
+  ): Promise<{
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+    suggestions: string[];
+  }> {
+    const response = await this.client.post<{
+      isValid: boolean;
+      errors: string[];
+      warnings: string[];
+      suggestions: string[];
+    }>(
+      '/api/validate-spec',
+      {
+        specification,
+        project_type: projectType
+      }
+    );
+    return response.data;
+  }
+
   // Epics
   async listEpics(projectId: string): Promise<Epic[]> {
     const response = await this.client.get<Epic[]>(`/api/projects/${projectId}/epics`);

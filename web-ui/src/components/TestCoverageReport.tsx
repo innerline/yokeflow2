@@ -144,14 +144,18 @@ export function TestCoverageReport({ projectId }: TestCoverageReportProps) {
       {/* Overall Statistics */}
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
         <h4 className="font-medium text-gray-100 mb-4">Overall Statistics</h4>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-100">{overall.total_tasks}</div>
             <div className="text-xs text-gray-400 mt-1">Total Tasks</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-gray-100">{overall.total_tests}</div>
-            <div className="text-xs text-gray-400 mt-1">Total Tests</div>
+            <div className="text-2xl font-bold text-blue-400">{overall.total_task_tests || overall.total_tests}</div>
+            <div className="text-xs text-gray-400 mt-1">Task Tests</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-400">{overall.total_epic_tests || 0}</div>
+            <div className="text-xs text-gray-400 mt-1">Epic Tests</div>
           </div>
           <div className="text-center">
             <div className={`text-2xl font-bold ${getCoverageColor(overall.coverage_percentage)}`}>

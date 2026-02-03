@@ -259,61 +259,12 @@ class TestErrorRecoveryWorkflow:
 class TestQualityCheckWorkflow:
     """Test quality check and review workflows."""
 
-    @pytest.mark.asyncio
-    async def test_quality_checks_during_session(self):
-        """Test that quality checks run during sessions."""
-        from server.quality.integration import QualityIntegration
-        from server.utils.config import Config
+    # REMOVED: test_quality_checks_during_session
+    # This test was for the old server.quality.metrics module which has been removed in v2.1
 
-        config = Config.load_default()
-        quality = QualityIntegration(config)
-
-        project_id = uuid4()
-        session_id = uuid4()
-
-        # Test quick metrics check using actual function
-        with patch('server.quality.metrics.quick_quality_check') as mock_check:
-            # quick_quality_check returns a list of issues (empty list means pass)
-            mock_check.return_value = []  # No issues means quality check passes
-
-            # Test analyze_session_logs
-            with patch('server.quality.metrics.analyze_session_logs') as mock_analyze:
-                mock_analyze.return_value = {
-                    'files_created': 5,
-                    'tests_written': 3,
-                    'browser_verified': True,
-                    'errors': []
-                }
-
-                # Quality check should pass
-                # Implementation depends on actual quality integration
-
-    @pytest.mark.asyncio
-    async def test_task_verification_workflow(self):
-        """Test task verification before marking as complete."""
-        from server.verification.integration import should_verify_task
-
-        task_id = uuid4()
-        session_id = uuid4()
-
-        # Test task marked as done triggers verification
-        tool_name = "mcp__task-manager__update_task_status"
-        tool_input = {"task_id": str(task_id), "done": True}
-
-        with patch('server.verification.task_verifier.TaskVerifier') as mock_verifier:
-            verifier = mock_verifier.return_value
-            verifier.verify_task = AsyncMock(return_value={
-                'success': True,
-                'tests_passed': 3,
-                'tests_failed': 0
-            })
-
-            should_proceed, modified_response = await should_verify_task(
-                tool_name, tool_input, session_id
-            )
-
-            # Should allow completion if verification passes
-            assert should_proceed
+    # REMOVED: test_task_verification_workflow
+    # This test was for the old server.verification module which has been removed in v2.1
+    pass
 
 
 class TestFullProjectLifecycle:

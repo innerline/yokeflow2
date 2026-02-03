@@ -11,18 +11,20 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, CheckCircle, Circle, XCircle, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, CheckCircle, Circle, XCircle, AlertCircle, FlaskConical } from 'lucide-react';
 import { ProgressBar } from './ProgressBar';
-import type { Epic, TaskWithTestCount } from '@/lib/types';
+import type { Epic, TaskWithTestCount, EpicTest } from '@/lib/types';
 
 interface EpicAccordionProps {
   epic: Epic;
   tasks: TaskWithTestCount[];
+  epicTests?: EpicTest[];
   onTaskClick: (taskId: number) => void;
 }
 
-export function EpicAccordion({ epic, tasks, onTaskClick }: EpicAccordionProps) {
+export function EpicAccordion({ epic, tasks, epicTests = [], onTaskClick }: EpicAccordionProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showTestCode, setShowTestCode] = useState<string | null>(null);
 
   // Calculate progress
   const completedTasks = tasks.filter(t => t.done).length;
@@ -32,6 +34,10 @@ export function EpicAccordion({ epic, tasks, onTaskClick }: EpicAccordionProps) 
   // Calculate test stats
   const totalTests = tasks.reduce((sum, t) => sum + (t.test_count || 0), 0);
   const passingTests = tasks.reduce((sum, t) => sum + (t.passing_test_count || 0), 0);
+
+  // Calculate epic test stats
+  const totalEpicTests = epicTests.length;
+  const passingEpicTests = epicTests.filter(t => t.last_result === 'passed').length;
 
   // Epic status badge
   const getStatusBadge = () => {
@@ -92,6 +98,11 @@ export function EpicAccordion({ epic, tasks, onTaskClick }: EpicAccordionProps) 
               <span className="text-gray-600 dark:text-gray-400">
                 Tests: <span className="text-gray-200 font-medium">{passingTests}/{totalTests}</span>
               </span>
+              {totalEpicTests > 0 && (
+                <span className="text-gray-600 dark:text-gray-400">
+                  Epic Tests: <span className="text-gray-200 font-medium">{passingEpicTests}/{totalEpicTests}</span>
+                </span>
+              )}
             </div>
             <ProgressBar
               value={progressPercent}
@@ -103,9 +114,80 @@ export function EpicAccordion({ epic, tasks, onTaskClick }: EpicAccordionProps) 
         </div>
       </button>
 
-      {/* Task List */}
+      {/* Task List and Epic Tests */}
       {isExpanded && (
         <div className="border-t border-gray-800">
+          {/* Epic Tests Section */}
+          {totalEpicTests > 0 && (
+            <div className="p-4 border-b border-gray-800 bg-gray-800/20">
+              <div className="flex items-center gap-2 mb-3">
+                <FlaskConical className="w-4 h-4 text-purple-400" />
+                <h4 className="text-sm font-medium text-gray-200">Epic Integration Tests</h4>
+              </div>
+              <div className="space-y-2">
+                {epicTests.map((test) => (
+                  <div key={test.id} className="bg-gray-900/50 rounded-lg p-3 border border-gray-700/50">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          {test.last_result === 'passed' ? (
+                            <CheckCircle className="w-4 h-4 text-green-400" />
+                          ) : test.last_result === 'failed' ? (
+                            <XCircle className="w-4 h-4 text-red-400" />
+                          ) : (
+                            <Circle className="w-4 h-4 text-gray-500" />
+                          )}
+                          <span className="text-sm font-medium text-gray-100">{test.name}</span>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                            test.test_type === 'integration' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                            test.test_type === 'e2e' ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' :
+                            'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                          }`}>
+                            {test.test_type}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 ml-6">{test.description}</p>
+
+                        {/* Show requirements if available */}
+                        {test.requirements && (
+                          <div className="mt-2 ml-6">
+                            <button
+                              onClick={() => setShowTestCode(showTestCode === test.id ? null : test.id)}
+                              className="text-xs text-blue-400 hover:text-blue-300"
+                            >
+                              {showTestCode === test.id ? 'Hide' : 'Show'} requirements
+                            </button>
+                            {showTestCode === test.id && (
+                              <div className="mt-2 p-3 bg-gray-950 rounded text-xs space-y-2">
+                                <div>
+                                  <span className="text-gray-500 font-medium">Requirements:</span>
+                                  <p className="text-gray-300 mt-1 whitespace-pre-wrap">{test.requirements}</p>
+                                </div>
+                                {test.success_criteria && (
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Success Criteria:</span>
+                                    <p className="text-gray-300 mt-1 whitespace-pre-wrap">{test.success_criteria}</p>
+                                  </div>
+                                )}
+                                {test.key_verification_points && (
+                                  <div>
+                                    <span className="text-gray-500 font-medium">Key Verification Points:</span>
+                                    <pre className="text-gray-300 mt-1">{JSON.stringify(test.key_verification_points, null, 2)}</pre>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tasks Section */}
           {tasks.length === 0 ? (
             <div className="p-4 text-center text-gray-500 text-sm">
               No tasks in this epic yet

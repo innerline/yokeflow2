@@ -236,7 +236,6 @@ async def trigger_analysis(request: TriggerAnalysisRequest, background_tasks: Ba
                 result = await analyzer.analyze_project(
                     project_id=project_id,
                     min_reviews=min_reviews_required,
-                    store_in_db=True,
                     triggered_by="manual",
                     analysis_id=analysis_id  # Pass the pre-created ID
                 )

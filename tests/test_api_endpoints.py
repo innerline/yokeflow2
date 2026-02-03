@@ -439,26 +439,8 @@ class TestProgressEndpoints:
 class TestQualityEndpoints:
     """Test quality and review endpoints."""
 
-    def test_get_project_quality(self, client):
-        """Test getting project quality summary."""
-        project_id = uuid4()
-
-        with patch('server.database.connection.get_db') as mock_get_db, \
-             patch('server.api.app.get_db') as mock_app_get_db:
-            mock_db = AsyncMock()
-            mock_db.get_project_quality_summary = AsyncMock(return_value={
-                'average_score': 0.85,
-                'total_checks': 100,
-                'passed_checks': 85,
-                'failed_checks': 15
-            })
-            mock_get_db.return_value = mock_db
-            mock_app_get_db.return_value = mock_db
-
-            response = client.get(f"/api/projects/{project_id}/quality")
-            assert response.status_code == 200
-            data = response.json()
-            assert data['average_score'] == 0.85
+    # Removed: test_get_project_quality() - endpoint removed (session_quality_checks table deprecated)
+    # Quality metrics now in sessions.metrics JSONB field. Use /deep-reviews endpoint for reviews.
 
     def test_get_deep_reviews(self, client):
         """Test getting deep reviews for a project."""

@@ -35,11 +35,19 @@ export interface Test {
   description: string;
   steps: string; // JSON array as string
   passes: 0 | 1 | boolean; // PostgreSQL uses boolean, legacy compatibility for 0/1
+  test_type?: 'unit' | 'api' | 'browser' | 'database' | 'integration';
+  requirements?: string;  // Test requirements describing what to verify
+  success_criteria?: string;  // Clear criteria for determining test success
+  verification_notes?: string;  // Notes from coding agent about verification
+  last_execution?: string | null;
+  last_result?: 'passed' | 'failed' | 'skipped' | 'error' | null;
+  execution_log?: string | null;
   created_at: string;
   verified_at: string | null;
 }
 
 export interface ProjectStatus {
+  project_id: string;
   total_epics: number;
   completed_epics: number;
   total_tasks: number;
@@ -112,6 +120,38 @@ export interface NewTest {
   category: Test['category'];
   description: string;
   steps: string[];
+  test_type?: 'unit' | 'api' | 'browser' | 'database' | 'integration';
+  requirements?: string;  // Test requirements instead of test_code
+  success_criteria?: string;  // Clear success criteria
+}
+
+export interface EpicTest {
+  id: string; // UUID
+  epic_id: EntityId;
+  name: string;
+  description: string;
+  test_type?: 'integration' | 'e2e' | 'workflow';
+  requirements?: string;  // Integration test requirements
+  success_criteria?: string;  // Clear criteria for epic test success
+  key_verification_points?: any;  // Array of key points to verify
+  verification_notes?: string;  // Notes about how epic was verified
+  depends_on_tasks?: EntityId[];
+  last_execution?: string | null;
+  last_result?: 'passed' | 'failed' | 'skipped' | 'error' | null;
+  execution_log?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewEpicTest {
+  epic_id: EntityId;
+  name: string;
+  description: string;
+  test_type?: 'integration' | 'e2e' | 'workflow';
+  requirements?: string;  // Test requirements instead of test_code
+  success_criteria?: string;  // Clear success criteria
+  key_verification_points?: any;  // Key verification points
+  depends_on_tasks?: EntityId[];
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed';

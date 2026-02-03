@@ -20,7 +20,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 // Import database implementation
 import { TaskDatabase } from './database.js';
-import type { NewTask, NewTest, NewEpic } from './types.js';
+import type { NewTask, NewTest, NewEpic, NewEpicTest } from './types.js';
 
 const execAsync = promisify(exec);
 
@@ -42,79 +42,165 @@ const idFieldSchema = {
   ]
 };
 
+// Test execution functions removed - tests are now requirement-based
+// Agents receive test requirements via get_task_tests and get_epic_tests
+
 /**
- * Run Python verification system for a task.
- * Called before marking task as complete to ensure tests pass.
- *
- * @param taskId - UUID of task to verify
- * @param sessionId - Optional UUID of current session
- * @returns Object with passed flag and message
+ * Get test requirements for a task
+ * Returns integration test requirements for the epic
  */
-async function runPythonVerification(
-  taskId: string,
-  sessionId?: string
-): Promise<{passed: boolean, message: string}> {
+async function getTaskTestRequirements(taskId: string): Promise<{hasRequirements: boolean, summary: string}> {
   try {
-    // Get project name to construct path
-    const projectName = await db.getProjectName();
-    const projectPath = `generations/${projectName}`;
+    // Get all tests for the task
+    const tests = await db.getTaskTests(taskId);
 
-    console.error(`[Verification] Running verification for task ${taskId}`);
-    console.error(`[Verification] Project path: ${projectPath}`);
-
-    // Determine the YokeFlow root directory (parent of mcp-task-manager)
-    const yokeflowRoot = path.resolve(__dirname, '..', '..');
-
-    // Build command
-    const args = [
-      '-m', 'server.verification.cli',
-      '--task-id', taskId,
-      '--project-path', projectPath
-    ];
-
-    if (sessionId) {
-      args.push('--session-id', sessionId);
-    }
-
-    // Run Python verification CLI with PYTHONPATH set to YokeFlow root
-    const { stdout, stderr } = await execAsync(
-      `python ${args.join(' ')}`,
-      {
-        timeout: 120000, // 2 minute timeout
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        cwd: yokeflowRoot, // Run from YokeFlow root
-        env: {
-          ...process.env,
-          PYTHONPATH: yokeflowRoot // Add YokeFlow root to Python path
-        }
-      }
-    );
-
-    // Exit code 0 = success
-    console.error(`[Verification] PASSED for task ${taskId}`);
-    return {
-      passed: true,
-      message: stdout || '✓ All tests passed'
-    };
-
-  } catch (error: any) {
-    // Check exit code
-    const exitCode = error.code;
-
-    if (exitCode === 2) {
-      // Configuration error - don't block task completion
-      console.error(`[Verification] Configuration error for task ${taskId}: ${error.stderr || error.message}`);
+    if (!tests || tests.length === 0) {
       return {
-        passed: true, // Don't block on config errors
-        message: `⚠️  Verification system error (task not blocked):\n${error.stderr || error.message}`
+        hasRequirements: false,
+        summary: `No test requirements found for task ${taskId}. Tests should be created during initialization.`
       };
     }
 
-    // Exit code 1 or other error = verification failed
-    console.error(`[Verification] FAILED for task ${taskId}: ${error.stderr || error.message}`);
+    console.error(`[TaskTests] Found ${tests.length} test requirements for task ${taskId}`);
+
+    const requirements: string[] = [];
+    requirements.push(`📋 Test Requirements for Task ${taskId}`);
+    requirements.push('');
+    requirements.push('The following requirements must be verified before marking this task complete:');
+    requirements.push('');
+
+    for (let i = 0; i < tests.length; i++) {
+      const test = tests[i];
+      requirements.push(`### Test ${i + 1}: ${test.description}`);
+      requirements.push(`Test ID: ${test.id}`);
+      requirements.push(`Type: ${test.test_type || 'unspecified'}`);
+      requirements.push('');
+
+      if (test.requirements) {
+        requirements.push('**Requirements:**');
+        requirements.push(test.requirements);
+        requirements.push('');
+      }
+
+      if (test.success_criteria) {
+        requirements.push('**Success Criteria:**');
+        requirements.push(test.success_criteria);
+        requirements.push('');
+      }
+
+      if (test.steps && test.steps !== '[]') {
+        requirements.push('**Verification Steps:**');
+        const steps = typeof test.steps === 'string' ? JSON.parse(test.steps) : test.steps;
+        steps.forEach((step: string, idx: number) => {
+          requirements.push(`${idx + 1}. ${step}`);
+        });
+        requirements.push('');
+      }
+
+      requirements.push('---');
+      requirements.push('');
+    }
+
+    requirements.push('');
+    requirements.push('⚠️  **IMPORTANT**: You must verify each requirement above and provide evidence that it passes.');
+    requirements.push('Use whatever methods are appropriate (manual testing, curl commands, browser verification, etc.)');
+    requirements.push('Document your verification in the task notes before marking the task complete.');
+
     return {
-      passed: false,
-      message: error.stderr || error.stdout || error.message || 'Verification failed'
+      hasRequirements: true,
+      summary: requirements.join('\n')
+    };
+  } catch (error: any) {
+    return {
+      hasRequirements: false,
+      summary: `Error getting test requirements for task ${taskId}: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Get epic test requirements
+ * Returns integration test requirements for the epic
+ */
+async function getEpicTestRequirements(epicId: string): Promise<{hasRequirements: boolean, summary: string}> {
+  try {
+    // Get all tests for the epic
+    const tests = await db.getEpicTests(epicId);
+
+    if (!tests || tests.length === 0) {
+      return {
+        hasRequirements: false,
+        summary: `No integration test requirements found for epic ${epicId}. Epic tests should be created during initialization.`
+      };
+    }
+
+    // Get epic details for context
+    const epic = await db.getEpic(epicId);
+    const epicName = epic ? epic.name : `Epic ${epicId}`;
+
+    console.error(`[EpicTests] Found ${tests.length} integration test requirements for ${epicName}`);
+
+    const requirements: string[] = [];
+    requirements.push(`📋 Integration Test Requirements for Epic: ${epicName}`);
+    requirements.push('');
+    requirements.push('The following integration requirements must be verified before marking this epic complete:');
+    requirements.push('');
+
+    for (let i = 0; i < tests.length; i++) {
+      const test = tests[i];
+      requirements.push(`### Integration Test ${i + 1}: ${test.name}`);
+      requirements.push(`Test ID: ${test.id}`);
+      requirements.push(`Description: ${test.description}`);
+      requirements.push(`Type: ${test.test_type || 'integration'}`);
+      requirements.push('');
+
+      if (test.requirements) {
+        requirements.push('**Requirements:**');
+        requirements.push(test.requirements);
+        requirements.push('');
+      }
+
+      if (test.success_criteria) {
+        requirements.push('**Success Criteria:**');
+        requirements.push(test.success_criteria);
+        requirements.push('');
+      }
+
+      if (test.key_verification_points) {
+        requirements.push('**Key Verification Points:**');
+        const points = typeof test.key_verification_points === 'string'
+          ? JSON.parse(test.key_verification_points)
+          : test.key_verification_points;
+        if (Array.isArray(points)) {
+          points.forEach((point: string, idx: number) => {
+            requirements.push(`${idx + 1}. ${point}`);
+          });
+        }
+        requirements.push('');
+      }
+
+      if (test.depends_on_tasks && test.depends_on_tasks.length > 0) {
+        requirements.push(`**Depends on tasks:** ${test.depends_on_tasks.join(', ')}`);
+        requirements.push('');
+      }
+
+      requirements.push('---');
+      requirements.push('');
+    }
+
+    requirements.push('');
+    requirements.push('⚠️  **IMPORTANT**: These are INTEGRATION tests - verify the complete workflow across all tasks.');
+    requirements.push('Ensure data flows correctly between components and the end-to-end user experience works.');
+    requirements.push('Document your verification process before marking the epic complete.');
+
+    return {
+      hasRequirements: true,
+      summary: requirements.join('\n')
+    };
+  } catch (error: any) {
+    return {
+      hasRequirements: false,
+      summary: `Error getting test requirements for epic ${epicId}: ${error.message}`
     };
   }
 }
@@ -258,7 +344,7 @@ const tools: Tool[] = [
     }
   },
   {
-    name: 'create_test',
+    name: 'create_task_test',
     description: 'Create a test case for a task',
     inputSchema: {
       type: 'object',
@@ -272,6 +358,11 @@ const tools: Tool[] = [
           enum: ['functional', 'style', 'accessibility', 'performance'],
           description: 'Category of test'
         },
+        test_type: {
+          type: 'string',
+          enum: ['unit', 'api', 'browser', 'database', 'integration'],
+          description: 'Type of test execution needed'
+        },
         description: {
           type: 'string',
           description: 'What this test verifies'
@@ -280,6 +371,14 @@ const tools: Tool[] = [
           type: 'array',
           items: { type: 'string' },
           description: 'Array of test steps to perform'
+        },
+        requirements: {
+          type: 'string',
+          description: 'Test requirements describing what to verify (not how)'
+        },
+        success_criteria: {
+          type: 'string',
+          description: 'Clear criteria for determining test success'
         }
       },
       required: ['task_id', 'category', 'description', 'steps']
@@ -318,21 +417,231 @@ const tools: Tool[] = [
     }
   },
   {
-    name: 'update_test_result',
-    description: 'Mark a test as passing or failing',
+    name: 'update_task_test_result',
+    description: 'Mark a task test as passing or failing',
     inputSchema: {
       type: 'object',
       properties: {
         test_id: {
           ...idFieldSchema,
-          description: 'The ID of the test'
+          description: 'The ID of the task test'
         },
         passes: {
           type: 'boolean',
           description: 'Whether the test passes'
+        },
+        verification_notes: {
+          type: 'string',
+          description: 'Optional notes about how the test was verified (what was checked and results)'
+        },
+        error_message: {
+          type: 'string',
+          description: 'Optional brief error message if test failed (for UI display)'
+        },
+        execution_time_ms: {
+          type: 'number',
+          description: 'Optional execution time in milliseconds for performance tracking'
         }
       },
       required: ['test_id', 'passes']
+    }
+  },
+  {
+    name: 'update_epic_test_result',
+    description: 'Mark an epic test as passing or failing',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        test_id: {
+          ...idFieldSchema,
+          description: 'The ID of the epic test'
+        },
+        result: {
+          type: 'string',
+          enum: ['passed', 'failed'],
+          description: 'The test result (passed or failed)'
+        },
+        execution_log: {
+          type: 'string',
+          description: 'Optional execution log for the test'
+        },
+        verification_notes: {
+          type: 'string',
+          description: 'Optional notes about how the epic was verified (what was checked and results)'
+        },
+        error_message: {
+          type: 'string',
+          description: 'Optional brief error message if test failed (for UI display)'
+        },
+        execution_time_ms: {
+          type: 'number',
+          description: 'Optional execution time in milliseconds for performance tracking'
+        }
+      },
+      required: ['test_id', 'result']
+    }
+  },
+  {
+    name: 'create_epic_test',
+    description: 'Create an integration test for an epic',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The epic this test belongs to'
+        },
+        name: {
+          type: 'string',
+          description: 'Name of the integration test'
+        },
+        description: {
+          type: 'string',
+          description: 'What this integration test verifies'
+        },
+        test_type: {
+          type: 'string',
+          enum: ['integration', 'e2e', 'workflow'],
+          description: 'Type of epic test (default: integration)'
+        },
+        depends_on_tasks: {
+          type: 'array',
+          items: { ...idFieldSchema },
+          description: 'Task IDs that must complete before this test'
+        },
+        requirements: {
+          type: 'string',
+          description: 'Integration test requirements for the epic'
+        },
+        success_criteria: {
+          type: 'string',
+          description: 'Clear criteria for epic test success'
+        },
+        key_verification_points: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Key points to verify in the workflow'
+        }
+      },
+      required: ['epic_id', 'name', 'description']
+    }
+  },
+  {
+    name: 'get_task_tests',
+    description: 'Get test requirements and details for a task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          ...idFieldSchema,
+          description: 'The ID of the task whose tests to retrieve'
+        },
+        stop_on_failure: {
+          type: 'boolean',
+          description: 'Whether to stop on first failure (default: true)'
+        }
+      },
+      required: ['task_id']
+    }
+  },
+  {
+    name: 'get_epic_tests',
+    description: 'Get integration test requirements and details for an epic',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The ID of the epic whose tests to retrieve'
+        },
+        stop_on_failure: {
+          type: 'boolean',
+          description: 'Whether to stop on first failure (default: false)'
+        },
+        verbose: {
+          type: 'boolean',
+          description: 'Whether to show detailed output (default: false)'
+        }
+      },
+      required: ['epic_id']
+    }
+  },
+  {
+    name: 'trigger_epic_retest',
+    description: 'Trigger epic re-testing after epic completion. Re-tests prior epics to catch regressions. Called automatically after every 2nd epic completion (configurable).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        triggered_by_epic_id: {
+          ...idFieldSchema,
+          description: 'The epic that just completed (triggers re-testing)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Current session ID'
+        }
+      },
+      required: ['triggered_by_epic_id']
+    }
+  },
+  {
+    name: 'record_epic_retest_result',
+    description: 'Record the result of an epic re-test. Call this after re-running epic tests to track stability and detect regressions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'The epic that was re-tested'
+        },
+        triggered_by_epic_id: {
+          ...idFieldSchema,
+          description: 'The epic that triggered this re-test'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Current session ID'
+        },
+        test_result: {
+          type: 'string',
+          enum: ['passed', 'failed', 'skipped', 'error'],
+          description: 'Overall result of the re-test'
+        },
+        execution_time_ms: {
+          type: 'number',
+          description: 'Total execution time in milliseconds'
+        },
+        error_details: {
+          type: 'string',
+          description: 'Error message if test failed'
+        },
+        tests_run: {
+          type: 'number',
+          description: 'Number of tests executed'
+        },
+        tests_passed: {
+          type: 'number',
+          description: 'Number of tests that passed'
+        },
+        tests_failed: {
+          type: 'number',
+          description: 'Number of tests that failed'
+        }
+      },
+      required: ['epic_id', 'test_result']
+    }
+  },
+  {
+    name: 'get_epic_stability_metrics',
+    description: 'Get stability metrics and re-test history for epics. Shows stability scores, regression counts, and re-test patterns.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'Specific epic ID (optional - omit for all epics)'
+        }
+      }
     }
   },
   {
@@ -362,8 +671,6 @@ const tools: Tool[] = [
       required: ['epic_id', 'tasks']
     }
   },
-  // DEPRECATED: log_session tool removed - sessions are now managed by orchestrator
-  // It was creating phantom sessions with status='completed' but no timestamps
   {
     name: 'mark_project_complete',
     description: 'Mark the project as complete when all epics, tasks, and tests are finished. Sets the completion timestamp in the database.',
@@ -402,143 +709,8 @@ const tools: Tool[] = [
       },
       required: ['command']
     }
-  },
-  {
-    name: 'run_task_verification',
-    description: 'Run verification tests for a completed task. Tests are automatically generated and executed.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: {
-          ...idFieldSchema,
-          description: 'The ID of the task to verify'
-        },
-        force: {
-          type: 'boolean',
-          description: 'Force re-run even if already verified'
-        }
-      },
-      required: ['task_id']
-    }
-  },
-  {
-    name: 'get_verification_status',
-    description: 'Get the verification status and test results for a task',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: {
-          ...idFieldSchema,
-          description: 'The ID of the task'
-        }
-      },
-      required: ['task_id']
-    }
-  },
-  {
-    name: 'track_file_modification',
-    description: 'Track that a file was modified during task implementation',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: {
-          ...idFieldSchema,
-          description: 'The ID of the current task'
-        },
-        file_path: {
-          type: 'string',
-          description: 'Path to the modified file'
-        },
-        modification_type: {
-          type: 'string',
-          enum: ['created', 'modified', 'deleted', 'renamed'],
-          description: 'Type of modification'
-        }
-      },
-      required: ['task_id', 'file_path']
-    }
-  },
-  {
-    name: 'list_verification_results',
-    description: 'List all verification results for the current project',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['passed', 'failed', 'manual_review', 'all'],
-          description: 'Filter by verification status'
-        }
-      }
-    }
-  },
-  {
-    name: 'validate_epic',
-    description: 'Trigger validation for an epic (requires all tasks to be complete)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        epic_id: {
-          ...idFieldSchema,
-          description: 'The ID of the epic to validate'
-        },
-        session_id: {
-          type: 'string',
-          description: 'Optional session ID for tracking'
-        }
-      },
-      required: ['epic_id']
-    }
-  },
-  {
-    name: 'get_epic_validation_status',
-    description: 'Get validation status for a specific epic',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        epic_id: {
-          ...idFieldSchema,
-          description: 'The ID of the epic'
-        }
-      },
-      required: ['epic_id']
-    }
-  },
-  {
-    name: 'list_epic_validation_results',
-    description: 'List recent epic validation results',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: {
-          type: 'number',
-          description: 'Maximum number of results to return (default: 10)'
-        }
-      }
-    }
-  },
-  {
-    name: 'mark_epic_validated',
-    description: 'Mark an epic as validated based on validation results',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        epic_id: {
-          ...idFieldSchema,
-          description: 'The ID of the epic'
-        },
-        validation_id: {
-          type: 'string',
-          description: 'The validation result ID'
-        },
-        session_id: {
-          type: 'string',
-          description: 'Optional session ID'
-        }
-      },
-      required: ['epic_id', 'validation_id']
-    }
   }
+
 ];
 
 // Create MCP server
@@ -593,6 +765,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ]
           };
         }
+
+        // Check if this is a special epic test requirement task
+        if (nextTask.id === 'EPIC_TEST_REQUIRED') {
+          // Return it as formatted text with clear instructions
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `${nextTask.description}\n\n${nextTask.action}\n\nEpic: ${nextTask.epic_name} (ID: ${nextTask.epic_id})`
+              }
+            ]
+          };
+        }
+
         return {
           content: [
             {
@@ -701,53 +887,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ]
         };
 
-      case 'create_test':
+      case 'create_task_test':
         const newTest: NewTest = {
           task_id: args?.task_id as any,
           category: args?.category as any,
           description: args?.description as string,
-          steps: args?.steps as string[]
+          steps: args?.steps as string[],
+          test_type: args?.test_type as any,
+          requirements: args?.requirements as string | undefined,
+          success_criteria: args?.success_criteria as string | undefined
         };
         const createdTest = await db.createTest(newTest);
         return {
           content: [
             {
               type: 'text',
-              text: `Created test ${createdTest.id}: ${createdTest.description}`
+              text: `Created test ${createdTest.id}: ${createdTest.description}${newTest.test_type ? ` (${newTest.test_type})` : ''}`
             }
           ]
         };
 
       case 'update_task_status':
-        // If marking task as done, run verification first
-        if (args?.done === true) {
-          const taskId = String(args?.task_id);
-          const sessionId = process.env.SESSION_ID; // Optional session context
-
-          console.error(`[MCP] Task ${taskId} completion requested - running verification...`);
-
-          const verificationResult = await runPythonVerification(taskId, sessionId);
-
-          if (!verificationResult.passed) {
-            // Verification failed - return error and don't update task
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `❌ Task ${taskId} CANNOT be marked complete - verification failed:\n\n${verificationResult.message}\n\n` +
-                        `Please fix the failing tests and try again. The task will remain incomplete until all tests pass.`
-                }
-              ],
-              isError: true
-            };
-          }
-
-          // Verification passed - log success
-          console.error(`[MCP] Task ${taskId} verification passed - marking complete`);
-          console.error(`[Verification] ${verificationResult.message}`);
-        }
-
-        // Proceed with normal task update (either verification passed or marking incomplete)
+        // Simply update the task status without verification
+        // Verification should happen BEFORE this using run_task_tests
         const updatedTask = await db.updateTaskStatus(
           args?.task_id as any,
           args?.done as boolean
@@ -760,8 +922,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: `Task ${updatedTask.id} marked as ${args?.done ? 'completed' : 'incomplete'}` +
-                    (args?.done ? '\n✅ All verification tests passed!' : '')
+              text: `Task ${updatedTask.id} marked as ${args?.done ? 'completed' : 'incomplete'}`
             }
           ]
         };
@@ -777,10 +938,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ]
         };
 
-      case 'update_test_result':
+      case 'update_task_test_result':
         const updatedTest = await db.updateTestResult(
           args?.test_id as any,
-          args?.passes as boolean
+          args?.passes as boolean,
+          args?.verification_notes as string | undefined,
+          args?.error_message as string | undefined,
+          args?.execution_time_ms as number | undefined
         );
         if (!updatedTest) {
           throw new Error(`Test ${args?.test_id} not found`);
@@ -789,10 +953,246 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: `Test ${updatedTest.id} marked as ${args?.passes ? 'passing' : 'failing'}`
+              text: `Test ${updatedTest.id} marked as ${args?.passes ? 'passing' : 'failing'}${args?.execution_time_ms ? ` (${args.execution_time_ms}ms)` : ''}`
             }
           ]
         };
+
+      case 'update_epic_test_result':
+        await db.updateEpicTestResult(
+          args?.test_id as any,
+          args?.result as 'passed' | 'failed',
+          args?.execution_log as string | undefined,
+          args?.verification_notes as string | undefined,
+          args?.error_message as string | undefined,
+          args?.execution_time_ms as number | undefined
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Epic test ${args?.test_id} marked as ${args?.result}${args?.execution_time_ms ? ` (${args.execution_time_ms}ms)` : ''}`
+            }
+          ]
+        };
+
+      case 'create_epic_test':
+        const newEpicTest: NewEpicTest = {
+          epic_id: args?.epic_id as any,
+          name: args?.name as string,
+          description: args?.description as string,
+          test_type: args?.test_type as any || 'integration',
+          requirements: args?.requirements as string | undefined,
+          success_criteria: args?.success_criteria as string | undefined,
+          key_verification_points: args?.key_verification_points as any | undefined,
+          depends_on_tasks: args?.depends_on_tasks as any[] | undefined
+        };
+        const createdEpicTest = await db.createEpicTest(newEpicTest);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Created epic test ${createdEpicTest.id}: ${createdEpicTest.name} (${newEpicTest.test_type})`
+            }
+          ]
+        };
+
+
+      case 'get_task_tests':
+        const taskIdForTests = args?.task_id as any;
+        const taskTestRequirements = await getTaskTestRequirements(taskIdForTests);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: taskTestRequirements.summary
+            }
+          ],
+          isError: !taskTestRequirements.hasRequirements
+        };
+
+      case 'get_epic_tests':
+        const epicIdForTests = args?.epic_id as any;
+        const epicTestRequirements = await getEpicTestRequirements(epicIdForTests);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: epicTestRequirements.summary
+            }
+          ],
+          isError: !epicTestRequirements.hasRequirements
+        };
+
+      case 'trigger_epic_retest':
+        const triggeredByEpicId = args?.triggered_by_epic_id as any;
+        const sessionIdForRetest = args?.session_id as string | undefined;
+
+        try {
+          const retestResult = await db.triggerEpicRetest(triggeredByEpicId, sessionIdForRetest);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: retestResult.message
+              }
+            ]
+          };
+        } catch (error: any) {
+          console.error(`[trigger_epic_retest] Error: ${error.message}`);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to trigger epic re-testing: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+
+      case 'record_epic_retest_result':
+        const epicIdForRetest = args?.epic_id as any;
+        const triggeredByForResult = args?.triggered_by_epic_id as any;
+        const sessionIdForResult = args?.session_id as string | undefined;
+        const testResult = args?.test_result as string;
+        const executionTimeMs = args?.execution_time_ms as number | undefined;
+        const errorDetails = args?.error_details as string | undefined;
+        const testsRun = args?.tests_run as number | undefined;
+        const testsPassed = args?.tests_passed as number | undefined;
+        const testsFailed = args?.tests_failed as number | undefined;
+
+        try {
+          const retestId = await db.recordEpicRetestResult({
+            epicId: epicIdForRetest,
+            triggeredByEpicId: triggeredByForResult,
+            sessionId: sessionIdForResult,
+            testResult,
+            executionTimeMs,
+            errorDetails,
+            testsRun,
+            testsPassed,
+            testsFailed
+          });
+
+          // Check if this was a regression
+          const metrics = await db.getEpicStabilityMetrics(epicIdForRetest);
+          const isRegression = metrics && metrics.length > 0 &&
+            metrics[0].last_retest_result === 'failed' &&
+            testResult === 'failed';
+
+          let message = `✅ Epic re-test result recorded (ID: ${retestId})\n\n`;
+          message += `Epic: ${epicIdForRetest}\n`;
+          message += `Result: ${testResult}\n`;
+
+          if (testsRun !== undefined) {
+            message += `Tests: ${testsPassed || 0}/${testsRun} passed`;
+            if (testsFailed) message += `, ${testsFailed} failed`;
+            message += `\n`;
+          }
+
+          if (executionTimeMs) {
+            message += `Execution time: ${(executionTimeMs / 1000).toFixed(2)}s\n`;
+          }
+
+          if (isRegression) {
+            message += `\n⚠️  REGRESSION DETECTED: This epic was passing before and is now failing!\n`;
+          }
+
+          if (errorDetails) {
+            message += `\nError: ${errorDetails}\n`;
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: message
+              }
+            ],
+            isError: testResult === 'failed' || testResult === 'error'
+          };
+        } catch (error: any) {
+          console.error(`[record_epic_retest_result] Error: ${error.message}`);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to record epic re-test result: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+
+      case 'get_epic_stability_metrics':
+        const epicIdForMetrics = args?.epic_id as any | undefined;
+
+        try {
+          const metrics = await db.getEpicStabilityMetrics(epicIdForMetrics);
+
+          if (!metrics || metrics.length === 0) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: epicIdForMetrics
+                    ? `No stability metrics found for epic ${epicIdForMetrics}`
+                    : 'No stability metrics found for any epics yet'
+                }
+              ]
+            };
+          }
+
+          let message = '📊 Epic Stability Metrics\n\n';
+
+          for (const metric of metrics) {
+            message += `**Epic ${metric.epic_id}: ${metric.epic_name}**\n`;
+            message += `Status: ${metric.epic_status} | Priority: ${metric.priority}\n`;
+            message += `Stability Score: ${metric.stability_score?.toFixed(2) || 'N/A'} (${metric.stability_rating || 'unrated'})\n`;
+            message += `Re-tests: ${metric.total_retests} total, ${metric.passed_retests} passed, ${metric.failed_retests} failed\n`;
+
+            if (metric.regression_count > 0) {
+              message += `⚠️  Regressions: ${metric.regression_count}\n`;
+            }
+
+            if (metric.last_retest_at) {
+              const daysAgo = metric.days_since_retest;
+              message += `Last re-tested: ${daysAgo} day(s) ago - ${metric.last_retest_result}\n`;
+            } else {
+              message += `Last re-tested: Never\n`;
+            }
+
+            if (metric.avg_execution_time_ms) {
+              message += `Avg execution time: ${(metric.avg_execution_time_ms / 1000).toFixed(2)}s\n`;
+            }
+
+            message += '\n';
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: message
+              }
+            ]
+          };
+        } catch (error: any) {
+          console.error(`[get_epic_stability_metrics] Error: ${error.message}`);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get epic stability metrics: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
 
       case 'expand_epic':
         const expandedTasks = await db.expandEpic(
@@ -936,260 +1336,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-      case 'run_task_verification':
-        // Manual verification trigger (also runs automatically on task completion)
-        const verifyTaskId = String(args?.task_id);
-        const force = args?.force as boolean || false;
-        const verifySessionId = process.env.SESSION_ID;
+      // Test execution removed - tests are now requirement-based
 
-        console.error(`[MCP] Manual verification requested for task ${verifyTaskId}`);
-
-        const manualVerificationResult = await runPythonVerification(verifyTaskId, verifySessionId);
-
-        if (manualVerificationResult.passed) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `✅ Task ${verifyTaskId} verification PASSED!\n\n${manualVerificationResult.message}\n\n` +
-                      `You can now mark this task as complete using update_task_status.`
-              }
-            ]
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `❌ Task ${verifyTaskId} verification FAILED:\n\n${manualVerificationResult.message}\n\n` +
-                      `Please fix the issues before marking the task as complete.`
-              }
-            ],
-            isError: true
-          };
-        }
-
-      case 'get_verification_status':
-        const statusTaskId = args?.task_id as any;
-
-        // Query verification results from database
-        const verificationResult = await db.query<any>(
-          `SELECT * FROM v_task_verification_status WHERE task_id = $1`,
-          [statusTaskId]
-        );
-
-        if (verificationResult && verificationResult.length > 0) {
-          const result = verificationResult[0] as any;
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Task ${statusTaskId} verification status:
-- Status: ${result.latest_verification_status || 'Not verified'}
-- Tests Run: ${result.tests_run || 0}
-- Tests Passed: ${result.tests_passed || 0}
-- Tests Failed: ${result.tests_failed || 0}
-- Retry Count: ${result.retry_count || 0}
-- Needs Review: ${result.needs_review ? 'Yes' : 'No'}`
-              }
-            ]
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Task ${statusTaskId} has not been verified yet.`
-              }
-            ]
-          };
-        }
-
-      case 'track_file_modification':
-        const trackTaskId = args?.task_id as any;
-        const filePath = args?.file_path as string;
-        const modificationType = args?.modification_type as string || 'modified';
-
-        // Insert file modification tracking
-        await db.query(
-          `INSERT INTO task_file_modifications
-           (task_id, file_path, modification_type, modified_at)
-           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
-          [trackTaskId, filePath, modificationType]
-        );
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Tracked ${modificationType} file: ${filePath} for task ${trackTaskId}`
-            }
-          ]
-        };
-
-      case 'list_verification_results':
-        const statusFilter = args?.status as string || 'all';
-
-        let query = `
-          SELECT task_id, task_description, latest_verification_status,
-                 tests_run, tests_passed, tests_failed, needs_review
-          FROM v_task_verification_status
-        `;
-
-        if (statusFilter !== 'all') {
-          query += ` WHERE latest_verification_status = '${statusFilter}'`;
-        }
-
-        query += ` ORDER BY last_verification_at DESC LIMIT 20`;
-
-        const results = await db.query<any>(query);
-
-        if (results && results.length > 0) {
-          const summary = results.map((r: any) =>
-            `- Task ${r.task_id}: ${r.latest_verification_status || 'Not verified'} (${r.tests_passed}/${r.tests_run} passed)`
-          ).join('\n');
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Recent verification results:\n${summary}`
-              }
-            ]
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'No verification results found.'
-              }
-            ]
-          };
-        }
-
-      case 'validate_epic':
-        const epicIdToValidate = parseInt((args as any).epic_id);
-
-        // Start epic validation
-        const validationId = crypto.randomUUID();
-        await db.query(
-          `INSERT INTO epic_validation_results (
-            id, epic_id, session_id, status, started_at
-          ) VALUES ($1, $2, $3, 'running', NOW())`,
-          [validationId, epicIdToValidate, (args as any).session_id || null]
-        );
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Epic validation started for epic ${epicIdToValidate}. Validation ID: ${validationId}\n\nNote: Full validation logic requires the Python verification system.`
-            }
-          ]
-        };
-
-      case 'get_epic_validation_status':
-        const epicStatusId = parseInt((args as any).epic_id);
-
-        const validationStatus = await db.query(
-          `SELECT
-            evs.*,
-            e.name as epic_name
-          FROM v_epic_validation_status evs
-          JOIN epics e ON e.id = evs.epic_id
-          WHERE evs.epic_id = $1`,
-          [epicStatusId]
-        ).then(r => r[0]) as any;
-
-        if (validationStatus) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Epic Validation Status:
-Epic: ${validationStatus.epic_name}
-Validated: ${validationStatus.validated ? 'Yes' : 'No'}
-Status: ${validationStatus.validation_status || 'Not started'}
-Tasks Verified: ${validationStatus.tasks_verified || 0}/${validationStatus.total_tasks || 0}
-Integration Tests Passed: ${validationStatus.integration_tests_passed || 0}/${validationStatus.integration_tests_failed ? validationStatus.integration_tests_passed + validationStatus.integration_tests_failed : 'N/A'}
-Rework Tasks: ${validationStatus.total_rework_tasks || 0}
-Last Validation: ${validationStatus.last_validation_at || 'Never'}`
-              }
-            ]
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `No validation status found for epic ${epicStatusId}`
-              }
-            ]
-          };
-        }
-
-      case 'list_epic_validation_results':
-        const epicValidations = await db.query(
-          `SELECT
-            evr.*,
-            e.name as epic_name
-          FROM epic_validation_results evr
-          JOIN epics e ON e.id = evr.epic_id
-          ORDER BY evr.started_at DESC
-          LIMIT $1`,
-          [(args as any)?.limit || 10]
-        ) as any[];
-
-        if (epicValidations.length > 0) {
-          const summary = epicValidations.map(v =>
-            `Epic: ${v.epic_name}
-  Status: ${v.status}
-  Tasks: ${v.tasks_verified}/${v.total_tasks} verified
-  Integration Tests: ${v.integration_tests_passed}/${v.integration_tests_run} passed
-  Rework Tasks Created: ${v.rework_tasks_created || 0}
-  Duration: ${v.duration_seconds || 0}s
-  Started: ${v.started_at}`
-          ).join('\n\n');
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Recent Epic Validation Results:\n\n${summary}`
-              }
-            ]
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'No epic validation results found.'
-              }
-            ]
-          };
-        }
-
-      case 'mark_epic_validated':
-        const epicToMark = parseInt((args as any).epic_id);
-        const validationToUse = (args as any).validation_id;
-
-        const markResult = await db.query(
-          `SELECT mark_epic_validated($1, $2, $3) as success`,
-          [epicToMark, validationToUse, (args as any).session_id || null]
-        ).then(r => r[0]) as any;
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: markResult?.success
-                ? `✅ Epic ${epicToMark} marked as validated`
-                : `❌ Failed to mark epic ${epicToMark} as validated`
-            }
-          ]
-        };
+      // Agents use get_task_tests and get_epic_tests to get requirements
 
       default:
         throw new Error(`Unknown tool: ${name}`);

@@ -5,7 +5,6 @@ Agent Session Logic
 Core agent interaction functions for running YokeFlow coding sessions.
 """
 
-import asyncio
 import signal
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Awaitable
@@ -13,11 +12,8 @@ from datetime import datetime
 
 from claude_agent_sdk import ClaudeSDKClient
 
-from server.client.claude import create_client
 from server.database.connection import DatabaseManager
-from server.utils.progress import print_session_header, print_progress_summary
-from server.client.prompts import get_initializer_prompt, get_coding_prompt, copy_spec_to_project
-from server.utils.observability import SessionLogger, QuietOutputFilter, create_session_logger
+from server.utils.observability import SessionLogger, QuietOutputFilter
 from server.agent.intervention import InterventionManager
 from server.utils.logging import (
     get_logger,
@@ -135,11 +131,11 @@ async def run_agent_session(
     if hasattr(logger, "project_id"):
         set_project_id(str(logger.project_id))
 
-    module_logger.info("Starting agent session", extra={
-        "project_dir": str(project_dir),
-        "verbose": verbose,
-        "intervention_enabled": intervention_config.get("enabled", False) if intervention_config else False
-    })
+    # module_logger.info("Starting agent session", extra={
+    #    "project_dir": str(project_dir),
+    #    "verbose": verbose,
+    #    "intervention_enabled": intervention_config.get("enabled", False) if intervention_config else False
+    # })
 
     output_filter = QuietOutputFilter(verbose=verbose)
 
@@ -270,30 +266,7 @@ async def run_agent_session(
                                         # Skip normal tool execution
                                         continue
 
-                                # Import verification integration
-                                from server.verification.integration import should_verify_task
-
-                                # Check if verification should block this
-                                should_proceed, modified_response = await should_verify_task(
-                                    tool_name, tool_input,
-                                    session_id=logger.session_id if hasattr(logger, "session_id") else None
-                                )
-
-                                if not should_proceed:
-                                    # Verification failed - inject error response
-                                    module_logger.warning(
-                                        "Task verification blocked completion",
-                                        extra={"task_id": tool_input.get("task_id")}
-                                    )
-
-                                    # Show verification failure message
-                                    if modified_response and "content" in modified_response:
-                                        for content in modified_response["content"]:
-                                            if content.get("type") == "text":
-                                                print(f"\n{content['text']}\n", flush=True)
-
-                                    # Skip normal tool execution
-                                    continue
+                                # Verification system removed - tests are now run via MCP tools
 
                         # Check for retry loops with intervention manager
                         if intervention_manager:
@@ -527,19 +500,41 @@ async def run_agent_session(
         if verbose:
             print("\n" + "-" * 70 + "\n")
 
-        # Finalize logging and get session summary
-        session_summary = logger.finalize("continue", response_text, usage_data=usage_data)
+        # Check if the response indicates a BLOCKED epic test intervention
+        # The agent's response should contain the BLOCKED message if it properly stopped
+        session_status = "continue"
+        if "BLOCKED:" in response_text or "BLOCKED on" in response_text:
+            session_status = "blocked"
+            module_logger.info("Epic test intervention detected - session blocked")
 
-        module_logger.info("Agent session completed successfully", extra={
-            "status": "continue",
-            "message_count": message_count,
-            "usage": usage_data
-        })
+            # Also check database for epic_test_interventions if needed
+            try:
+                async with DatabaseManager() as db:
+                    async with db.acquire() as conn:
+                        # Check for recent epic test interventions
+                        result = await conn.fetchval(
+                            """SELECT COUNT(*) FROM epic_test_interventions
+                               WHERE session_id = $1 AND blocked = true""",
+                            session_id
+                        )
+                        if result > 0:
+                            session_status = "blocked"
+            except Exception as e:
+                module_logger.warning(f"Could not check epic test interventions: {e}")
+
+        # Finalize logging and get session summary
+        session_summary = logger.finalize(session_status, response_text, usage_data=usage_data)
+
+        # module_logger.info("Agent session completed successfully", extra={
+        #    "status": session_status,
+        #    "message_count": message_count,
+        #    "usage": usage_data
+        # })
 
         # Clear context before returning
         clear_context()
 
-        return "continue", response_text, session_summary
+        return session_status, response_text, session_summary
 
     except RuntimeError as e:
         # Re-raise RuntimeError (critical errors like credit issues) without catching
@@ -579,210 +574,3 @@ async def run_agent_session(
 
         return "error", str(e), session_summary
 
-
-async def run_autonomous_agent(
-    project_dir: Path,
-    initializer_model: str,
-    coding_model: str,
-    max_iterations: Optional[int] = None,
-    verbose: bool = False,
-) -> None:
-    """
-    Run the autonomous agent loop.
-
-    Args:
-        project_dir: Directory for the project
-        initializer_model: Claude model to use for initialization session
-        coding_model: Claude model to use for coding sessions
-        max_iterations: Maximum number of iterations (None for unlimited)
-        verbose: If True, show detailed terminal output (default: quiet mode)
-    """
-    # Set up graceful shutdown handling
-    session_manager = SessionManager()
-    session_manager.setup_handlers()
-
-    try:
-        await _run_agent_loop(
-            project_dir=project_dir,
-            initializer_model=initializer_model,
-            coding_model=coding_model,
-            max_iterations=max_iterations,
-            verbose=verbose,
-            session_manager=session_manager,
-        )
-    finally:
-        # Restore original signal handlers
-        session_manager.restore_handlers()
-
-
-async def _run_agent_loop(
-    project_dir: Path,
-    initializer_model: str,
-    coding_model: str,
-    max_iterations: Optional[int],
-    verbose: bool,
-    session_manager: SessionManager,
-) -> None:
-    """
-    Internal function for the agent loop (separated for signal handling).
-
-    Args:
-        project_dir: Directory for the project
-        initializer_model: Claude model to use for initialization session
-        coding_model: Claude model to use for coding sessions
-        max_iterations: Maximum number of iterations (None for unlimited)
-        verbose: If True, show detailed terminal output
-        session_manager: Session manager for graceful shutdown
-    """
-    print("\n" + "=" * 70)
-    print("  AUTONOMOUS CODING AGENT DEMO")
-    print("=" * 70)
-    print(f"\nProject directory: {project_dir}")
-    print(f"Initializer model: {initializer_model}")
-    print(f"Coding model: {coding_model}")
-    if max_iterations:
-        print(f"Max iterations: {max_iterations}")
-    else:
-        print("Max iterations: Unlimited (will run until completion)")
-    print("Task management: MCP-based (mcp__task-manager__* tools)")
-    print()
-
-    # Create project directory
-    project_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check if this is a fresh start or continuation
-    # Check PostgreSQL database for epics to determine if initialization is needed
-    project_name = project_dir.name
-    is_first_run = False
-
-    async with DatabaseManager() as db:
-        project = await db.get_project_by_name(project_name)
-        if project:
-            # Project exists - check if it has epics (initialization complete)
-            epics = await db.list_epics(project['id'])
-            is_first_run = len(epics) == 0
-        else:
-            # Project doesn't exist in database - this is a fresh start
-            is_first_run = True
-
-    if is_first_run:
-        print("Fresh start - will use initializer agent")
-        print()
-        print("=" * 70)
-        print("  NOTE: First session (initialization) will set up the database")
-        print("  and create the hierarchical task structure. This may take a few minutes.")
-        print("  The agent will stop after initialization is complete.")
-        print("=" * 70)
-        print()
-        # Copy the app spec to project directory
-        copy_spec_to_project(project_dir)
-    else:
-        print("Continuing existing project")
-        print_progress_summary(project_dir)
-
-    # Main loop
-    # Note: iteration is for the current script run, session number is global across all runs
-    iteration = 0
-
-    while True:
-        iteration += 1
-
-        # Check max iterations
-        if max_iterations and iteration > max_iterations:
-            print(f"\nReached max iterations ({max_iterations})")
-            print("To continue, run the script again without --max-iterations")
-            break
-
-        # Print session header
-        print_session_header(iteration, is_first_run)
-
-        # Determine session type and model to use
-        session_type = "initializer" if is_first_run else "coding"
-        current_model = initializer_model if is_first_run else coding_model
-
-        # Create session logger (always enabled)
-        # Pass 0 to auto-determine session number from existing logs
-        logger = create_session_logger(project_dir, 0, session_type, current_model)
-
-        # Register logger with session manager for graceful shutdown
-        session_manager.set_current_logger(logger)
-
-        if verbose:
-            print(f"Session log: {logger.jsonl_file.relative_to(project_dir)}")
-            print(f"Using model: {current_model}")
-            print()
-
-        # Create client (fresh context) with appropriate model
-        client = create_client(project_dir, current_model)
-
-        # Choose prompt based on session type
-        if is_first_run:
-            prompt = get_initializer_prompt()
-            was_initializer = True
-            is_first_run = False  # Only use initializer once
-        else:
-            prompt = get_coding_prompt()
-            was_initializer = False
-
-        # Run session with async context manager
-        async with client:
-            status, response = await run_agent_session(
-                client, prompt, project_dir, logger=logger, verbose=verbose
-            )
-
-        # Clear the logger from session manager (session is complete)
-        session_manager.set_current_logger(None)
-
-        # Stop after initializer completes
-        if was_initializer:
-            print("\n" + "=" * 70)
-            print("  INITIALIZATION COMPLETE")
-            print("=" * 70)
-            print("\nThe task database has been set up successfully.")
-            print("Run the script again to start the coding sessions.")
-            print("\nTask management is handled via MCP tools.")
-            print("The agent uses mcp__task-manager__* tools to interact with tasks.")
-            print("=" * 70)
-            break
-
-        # Handle status for coding sessions
-        if status == "continue":
-            print(f"\nAgent will auto-continue in {AUTO_CONTINUE_DELAY_SECONDS}s...")
-            print_progress_summary(project_dir)
-            await asyncio.sleep(AUTO_CONTINUE_DELAY_SECONDS)
-
-        elif status == "error":
-            print("\n" + "=" * 70)
-            print("  SESSION ENDED DUE TO ERROR")
-            print("=" * 70)
-            print("\nThe session encountered an error and has been terminated.")
-            print("Session logs have been saved.")
-            print("\nTo retry, run the same command again.")
-            print("The agent will resume from where it left off.")
-            print("=" * 70)
-            break  # Exit the loop on error instead of retrying
-
-        # Small delay between sessions (only if continuing)
-        if status == "continue" and (max_iterations is None or iteration < max_iterations):
-            print("\nPreparing next session...\n")
-            await asyncio.sleep(1)
-
-    # Final summary
-    print("\n" + "=" * 70)
-    print("  SESSION COMPLETE")
-    print("=" * 70)
-    print(f"\nProject directory: {project_dir}")
-    print_progress_summary(project_dir)
-
-    # Print instructions for running the generated application
-    print("\n" + "-" * 70)
-    print("  TO RUN THE GENERATED APPLICATION:")
-    print("-" * 70)
-    print(f"\n  cd {project_dir.resolve()}")
-    print("  ./init.sh           # Run the setup script")
-    print("  # Or manually:")
-    print("  npm install && npm run dev")
-    print("\n  Then open http://localhost:3000 (or check init.sh for the URL)")
-    print("-" * 70)
-
-    print("\nDone!")

@@ -2,22 +2,42 @@
 
 A Model Context Protocol (MCP) server for managing hierarchical task tracking in autonomous coding projects.
 
+**Version**: 2.1.0
+
 ## Overview
 
 This MCP server provides structured task management capabilities through a **PostgreSQL database**, enabling agents to:
 - Query project progress and next tasks
 - Create and expand epics into tasks
 - Update task completion status
-- Track test results (pass/fail)
+- Track test results with error details, execution time, and retry counts ⭐ NEW v2.1
+- Trigger automated epic re-testing for regression detection ⭐ NEW v2.1
+- Query stability metrics and analytics ⭐ NEW v2.1
 - Log session history
 
 **Architecture:** TypeScript MCP server with `pg` (node-postgres) for database operations and connection pooling.
 
-**Status:** Production-ready (PostgreSQL migration complete, December 2025)
+**Status:** Production-ready (v2.1.0, February 2026)
+
+## What's New in v2.1
+
+**Test Execution Tracking** (Phase 1-2):
+- Enhanced test result recording with error messages
+- Execution time tracking for performance analysis
+- Automatic retry count incrementation
+- Performance indexes for detecting slow/flaky tests
+
+**Epic Re-testing** (Phase 5):
+- Smart epic selection (foundation, high-dependency, standard)
+- Automatic regression detection
+- Stability scoring (0.00-1.00 scale)
+- 3 new MCP tools for re-testing workflow
+
+**Total Tool Count**: 15 tools (v2.0) → 20+ tools (v2.1)
 
 ## Features
 
-### 15+ MCP Tools for Task Management
+### 20+ MCP Tools for Task Management
 
 **Query Tools** (read-only):
 - `task_status` - Overall project progress statistics
@@ -28,6 +48,7 @@ This MCP server provides structured task management capabilities through a **Pos
 - `get_task` - Task details including all tests
 - `list_tests` - All tests for a specific task
 - `get_session_history` - Recent work session log
+- `get_epic_stability_metrics` - Stability scores and re-test analytics ⭐ NEW v2.1
 
 **Mutation Tools** (write operations):
 - `create_epic` - Create new high-level feature area
@@ -35,9 +56,15 @@ This MCP server provides structured task management capabilities through a **Pos
 - `create_test` - Add test case to a task
 - `update_task_status` - Mark task complete/incomplete
 - `start_task` - Mark task as started (tracks timing)
-- `update_test_result` - Mark test as pass/fail
+- `update_test_result` - Mark test as pass/fail (legacy)
+- `update_task_test_result` - Mark task test pass/fail with error details ⭐ NEW v2.1
+- `update_epic_test_result` - Mark epic test pass/fail with error details ⭐ NEW v2.1
 - `expand_epic` - Break epic into multiple tasks (bulk create)
 - `log_session` - Log session completion with metadata
+
+**Quality System Tools** ⭐ NEW v2.1:
+- `trigger_epic_retest` - Trigger smart epic re-testing (Phase 5)
+- `record_epic_retest_result` - Record re-test with regression detection (Phase 5)
 
 **All tools are project-scoped** - Operations automatically filtered by `PROJECT_ID` environment variable.
 
@@ -334,6 +361,14 @@ mcp__task-manager__update_task_status(task_id=42, completed=True)
 
 ## Version History
 
+**v2.1.0** (February 2026)
+- ✅ Test execution tracking (error messages, execution time, retry counts)
+- ✅ Epic re-testing system (3 new tools)
+- ✅ Stability scoring and analytics
+- ✅ Automatic regression detection
+- ✅ Performance indexes for test analysis
+- ✅ 20+ MCP tools total
+
 **v2.0.0** (December 2025)
 - ✅ PostgreSQL migration complete
 - ✅ Async operations with connection pooling
@@ -341,11 +376,12 @@ mcp__task-manager__update_task_status(task_id=42, completed=True)
 - ✅ JSONB metadata support
 - ✅ Multi-project support
 - ✅ Production-ready architecture
+- ✅ 15 MCP tools
 
 **v1.0.0** (Initial Release)
 - MCP protocol implementation
 - SQLite support (legacy, removed)
-- 15+ tools for task management
+- Basic task management tools
 
 ## Future Enhancements
 
@@ -363,7 +399,21 @@ mcp__task-manager__update_task_status(task_id=42, completed=True)
 
 ## Related Documentation
 
-- [API README](../api/README.md) - REST API documentation
-- [Main README](../README.md) - Platform overview
-- [CLAUDE.md](../CLAUDE.md) - Developer guide
-- [Database Schema](../schema/postgresql/001_initial_schema.sql) - Full schema
+### MCP Documentation
+- [docs/mcp-usage.md](../docs/mcp-usage.md) - MCP usage guide for developers
+- [MCP Protocol Specification](https://spec.modelcontextprotocol.io/) - Official MCP docs
+
+### Quality System (v2.1)
+- [QUALITY_SYSTEM_SUMMARY.md](../QUALITY_SYSTEM_SUMMARY.md) - Phase-by-phase implementation summary
+- [docs/quality-system.md](../docs/quality-system.md) - Complete quality system documentation
+- [docs/configuration.md](../docs/configuration.md) - Epic testing and re-testing configuration
+
+### Platform Documentation
+- [README.md](../README.md) - Platform overview
+- [CLAUDE.md](../CLAUDE.md) - Quick reference guide
+- [docs/developer-guide.md](../docs/developer-guide.md) - Platform architecture
+- [docs/api-usage.md](../docs/api-usage.md) - REST API reference (60+ endpoints)
+
+### Database
+- [schema/postgresql/schema.sql](../schema/postgresql/schema.sql) - Complete database schema
+- [docs/postgres-setup.md](../docs/postgres-setup.md) - PostgreSQL setup guide

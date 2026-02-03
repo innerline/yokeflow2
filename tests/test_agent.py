@@ -419,44 +419,8 @@ class TestRunAgentSession:
         assert "[Usage]" in captured.out
         assert "[Cost]" in captured.out
 
-    @pytest.mark.asyncio
-    async def test_run_agent_session_task_verification(self, mock_client, mock_logger, project_dir):
-        """Test agent session with task verification."""
-        # Setup mock tool use for update_task_status with done=true
-        tool_block = Mock()
-        tool_block.name = "mcp__task-manager__update_task_status"
-        tool_block.id = "tool-123"
-        tool_block.input = {"task_id": "task-456", "done": True}
-        type(tool_block).__name__ = "ToolUseBlock"
-
-        assistant_msg = Mock()
-        assistant_msg.content = [tool_block]
-        type(assistant_msg).__name__ = "AssistantMessage"
-
-        # Create an async generator function
-        async def async_response_generator():
-            yield assistant_msg
-
-        # Mock receive_response to return the async generator
-        mock_client.receive_response.return_value = async_response_generator()
-
-        with patch('server.verification.integration.should_verify_task') as mock_verify:
-            # Simulate verification passing
-            mock_verify.return_value = (True, None)
-
-            status, response, session_summary = await run_agent_session(
-                client=mock_client,
-                message="Mark task as done",
-                project_dir=project_dir,
-                logger=mock_logger,
-                verbose=False
-            )
-
-            mock_verify.assert_called_once_with(
-                "mcp__task-manager__update_task_status",
-                {"task_id": "task-456", "done": True},
-                session_id="test-session-id"
-            )
+    # REMOVED: test_run_agent_session_task_verification
+    # This test was for the old server.verification module which has been removed in v2.1
 
     @pytest.mark.asyncio
     async def test_run_agent_session_exception_handling(self, mock_client, mock_logger, project_dir):

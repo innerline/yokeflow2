@@ -192,6 +192,19 @@ export function SessionTimeline({ sessions, projectId, onSessionStopped }: Sessi
                 {duration !== null && (
                   <span>• Duration: {formatDuration(duration)}</span>
                 )}
+                {session.metrics?.quality_score !== undefined && session.status === 'completed' && (
+                  <span className={
+                    session.metrics.quality_score >= 9
+                      ? 'text-green-400'
+                      : session.metrics.quality_score >= 7
+                      ? 'text-blue-400'
+                      : session.metrics.quality_score >= 5
+                      ? 'text-yellow-400'
+                      : 'text-red-400'
+                  }>
+                    • Quality: {session.metrics.quality_score}/10
+                  </span>
+                )}
                 {isRunning && session.started_at && (
                   <span>• Started {formatRelativeTime(session.started_at)}</span>
                 )}

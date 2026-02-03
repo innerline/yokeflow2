@@ -14,40 +14,13 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { api } from '@/lib/api';
-import { SessionQualityBadge, QualityLegend } from './SessionQualityBadge';
 import { TestCoverageReport } from './TestCoverageReport';
-import { TrendingUp, CheckCircle, Eye, Download, AlertTriangle } from 'lucide-react';
+import { Download, AlertTriangle } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface QualityDashboardProps {
   projectId: string;
-}
-
-interface QualitySummary {
-  total_sessions: number;
-  checked_sessions: number;
-  avg_quality_rating: number | null;
-  sessions_without_browser_verification: number;
-  avg_error_rate_percent: number | null;
-  avg_playwright_calls_per_session: number | null;
-}
-
-interface SessionQuality {
-  id: string;  // Quality check ID (unique)
-  session_id: string;
-  session_number: number;
-  check_type: 'quick' | 'deep' | 'final';
-  overall_rating: number;
-  playwright_count: number;
-  playwright_screenshot_count: number;
-  error_count: number;
-  error_rate: number;
-  critical_issues: any[];
-  warnings: any[];
-  prompt_improvements: any[];
-  review_text: string | null;
-  created_at: string;
 }
 
 interface DeepReview {
@@ -68,13 +41,11 @@ interface DeepReview {
 }
 
 export function QualityDashboard({ projectId }: QualityDashboardProps) {
-  const [summary, setSummary] = useState<QualitySummary | null>(null);
-  const [sessions, setSessions] = useState<SessionQuality[]>([]);
   const [deepReviews, setDeepReviews] = useState<DeepReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'test-coverage' | 'session-quality' | 'deep-reviews'>('test-coverage');
+  const [activeTab, setActiveTab] = useState<'test-coverage' | 'deep-reviews'>('test-coverage');
 
   useEffect(() => {
     loadQualityData();
@@ -97,55 +68,9 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
       setLoading(true);
       setError(null);
 
-      // Load all quality data in parallel
-      const [summaryRes, sessionsData, deepReviewsRes] = await Promise.all([
-        axios.get(`${API_BASE}/api/projects/${projectId}/quality`),
-        api.listSessions(projectId),
-        axios.get(`${API_BASE}/api/projects/${projectId}/deep-reviews`)
-      ]);
-
-      setSummary(summaryRes.data);
+      // Load deep reviews
+      const deepReviewsRes = await axios.get(`${API_BASE}/api/projects/${projectId}/deep-reviews`);
       setDeepReviews(deepReviewsRes.data.reviews || []);
-
-      // Fetch quality data for each session
-      const sessionsWithQuality = await Promise.all(
-        sessionsData.map(async (session: any) => {
-          try {
-            const qualityRes = await axios.get(
-              `${API_BASE}/api/projects/${projectId}/sessions/${session.id}/quality`
-            );
-            return {
-              ...qualityRes.data,
-              session_number: session.session_number,
-              // Don't override session_id if it already exists in qualityRes.data
-              session_id: qualityRes.data.session_id || session.id
-            };
-          } catch (err: any) {
-            // Session might not have quality check yet - suppress 404 errors
-            if (err.response?.status !== 404) {
-              console.error(`Failed to load quality for session ${session.id}:`, err);
-            }
-            return null;
-          }
-        })
-      );
-
-      // Filter out nulls and sort by session number
-      const validSessions = sessionsWithQuality
-        .filter((s) => s !== null)
-        .sort((a, b) => a!.session_number - b!.session_number) as SessionQuality[];
-
-      // Deduplicate by quality check ID to prevent React key warnings
-      const uniqueSessions = validSessions.reduce((acc, session) => {
-        if (!acc.find(s => s.id === session.id)) {
-          acc.push(session);
-        } else {
-          console.warn(`Duplicate quality check ID found: ${session.id} (session ${session.session_number})`);
-        }
-        return acc;
-      }, [] as SessionQuality[]);
-
-      setSessions(uniqueSessions);
     } catch (err: any) {
       console.error('Failed to load quality data:', err);
       setError(err.message || 'Failed to load quality data');
@@ -177,24 +102,6 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
     );
   }
 
-  // Calculate quality trend (for session quality tab)
-  const recentSessions = sessions.slice(-10); // Last 10 sessions
-  const avgQuality = summary?.avg_quality_rating || 0;
-  const browserVerificationCompliance =
-    summary && summary.total_sessions > 0
-      ? ((summary.total_sessions - summary.sessions_without_browser_verification) /
-          summary.total_sessions) *
-        100
-      : 0;
-
-  // Quality tab workflow:
-  // - Test Coverage tab: Populated after Session 0 (initialization) completes
-  // - Session Quality tab: Populated after Session 1+ (coding sessions) complete
-  //
-  // This means projects will always show Test Coverage first, then Session Quality
-  // appears once coding begins.
-  const hasSessionQualityData = summary && sessions.length > 0;
-
   return (
     <div className="space-y-6">
       {/* Sub-tabs */}
@@ -209,19 +116,6 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
         >
           Test Coverage
           {activeTab === 'test-coverage' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></div>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('session-quality')}
-          className={`px-4 py-2 text-sm font-medium transition-colors relative ${
-            activeTab === 'session-quality'
-              ? 'text-blue-400'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
-        >
-          Session Quality
-          {activeTab === 'session-quality' && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></div>
           )}
         </button>
@@ -252,146 +146,6 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
         </div>
       )}
 
-      {/* Session Quality Tab */}
-      {activeTab === 'session-quality' && (
-        <div className="animate-fadeIn space-y-6">
-          {!hasSessionQualityData ? (
-            <div className="text-center py-12">
-              <div className="text-gray-500 text-4xl mb-3">📊</div>
-              <p className="text-gray-600 dark:text-gray-400">No session quality data available yet</p>
-              <p className="text-sm text-gray-500 mt-2">
-                Quality checks run after Session 1+ (coding sessions) complete
-              </p>
-              <p className="text-xs text-gray-600 mt-3">
-                💡 Tip: Check the <span className="text-blue-400">Test Coverage</span> tab to see initialization results
-              </p>
-            </div>
-          ) : (
-            <>
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Average Quality */}
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Avg Quality</span>
-            <TrendingUp className="w-4 h-4 text-blue-400" />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-100">
-              {avgQuality.toFixed(1)}
-            </span>
-            <span className="text-sm text-gray-700 dark:text-gray-500">/  10</span>
-          </div>
-          <div className="mt-2">
-            <SessionQualityBadge
-              rating={Math.round(avgQuality)}
-              size="sm"
-              showLabel={false}
-            />
-          </div>
-        </div>
-
-        {/* Sessions Checked */}
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Sessions Checked</span>
-            <CheckCircle className="w-4 h-4 text-green-400" />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-100">
-              {summary.checked_sessions}
-            </span>
-            <span className="text-sm text-gray-700 dark:text-gray-500">
-              / {summary.total_sessions}
-            </span>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {summary.total_sessions > 0
-              ? `${Math.round((summary.checked_sessions / summary.total_sessions) * 100)}% coverage`
-              : 'No sessions yet'}
-          </div>
-        </div>
-
-        {/* Browser Verification */}
-        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Browser Checks</span>
-            <Eye className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-100">
-              {browserVerificationCompliance.toFixed(0)}%
-            </span>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {summary.sessions_without_browser_verification > 0
-              ? `${summary.sessions_without_browser_verification} sessions without`
-              : 'All sessions verified'}
-          </div>
-        </div>
-      </div>
-
-      {/* Quality Trend Chart */}
-      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-        <h3 className="text-lg font-semibold text-gray-100 mb-4">Quality Trend</h3>
-        <div className="space-y-2">
-          {recentSessions.map((session) => (
-            <div
-              key={session.id}
-              className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-gray-700/50 transition-colors"
-            >
-              <div className="flex-shrink-0 w-24 text-sm text-gray-600 dark:text-gray-400">
-                Session {session.session_number}
-              </div>
-              <div className="flex-1">
-                <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all ${
-                      session.overall_rating >= 9
-                        ? 'bg-green-500'
-                        : session.overall_rating >= 7
-                          ? 'bg-blue-500'
-                          : session.overall_rating >= 5
-                            ? 'bg-yellow-500'
-                            : 'bg-red-500'
-                    }`}
-                    style={{ width: `${session.overall_rating * 10}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div className="flex-shrink-0">
-                <SessionQualityBadge
-                  rating={session.overall_rating}
-                  checkType={session.check_type}
-                  size="sm"
-                  showLabel={false}
-                />
-              </div>
-              <div className="flex-shrink-0 w-32 text-xs text-gray-500 text-right">
-                {session.playwright_count > 0
-                  ? `${session.playwright_count} Browser Checks`
-                  : 'No Browser Checks'}
-              </div>
-            </div>
-          ))}
-        </div>
-        {sessions.length > 10 && (
-          <div className="mt-4 text-sm text-gray-500 text-center">
-            Showing last 10 sessions
-          </div>
-        )}
-      </div>
-
-      {/* Quality Legend */}
-      <div className="flex justify-center">
-        <QualityLegend />
-      </div>
-
-            </>
-          )}
-        </div>
-      )}
-
       {/* Deep Reviews Tab */}
       {activeTab === 'deep-reviews' && (
         <div className="animate-fadeIn space-y-6">
@@ -418,11 +172,17 @@ export function QualityDashboard({ projectId }: QualityDashboardProps) {
                           <span className="text-sm font-medium text-gray-300">
                             Session {review.session_number}
                           </span>
-                          <SessionQualityBadge
-                            rating={review.overall_rating}
-                            checkType="deep"
-                            size="sm"
-                          />
+                          <span className={`px-2 py-0.5 text-xs rounded ${
+                            review.overall_rating >= 9
+                              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                              : review.overall_rating >= 7
+                              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                              : review.overall_rating >= 5
+                              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                              : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          }`}>
+                            {review.overall_rating}/10
+                          </span>
                           {review.review_summary?.one_line && (
                             <span className="text-xs text-gray-400 max-w-md truncate">
                               {review.review_summary.one_line}

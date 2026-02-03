@@ -164,7 +164,7 @@ class QualityGates:
         Returns:
             GateResult with pass/fail status and improvements
         """
-        logger.info(f"Running task quality gate for task {task_id}")
+        # logger.info(f"Running task quality gate for task {task_id}")
 
         with PerformanceLogger("task_quality_gate", {"task_id": task_id}):
             result = GateResult(
@@ -228,14 +228,14 @@ class QualityGates:
                 session_id=session_id
             )
 
-            logger.info(
-                f"Task gate {result.status.value}: score={result.score:.2f}",
-                extra={
-                    "task_id": task_id,
-                    "score": result.score,
-                    "status": result.status.value
-                }
-            )
+            # logger.info(
+            #    f"Task gate {result.status.value}: score={result.score:.2f}",
+            #    extra={
+            #        "task_id": task_id,
+            #        "score": result.score,
+            #        "status": result.status.value
+            #    }
+            # )
 
             return result
 
@@ -260,7 +260,7 @@ class QualityGates:
         Returns:
             GateResult with pass/fail status and improvements
         """
-        logger.info(f"Running epic quality gate for epic {epic_id}")
+        # logger.info(f"Running epic quality gate for epic {epic_id}")
 
         result = GateResult(
             gate_type=GateType.EPIC,
@@ -322,14 +322,14 @@ class QualityGates:
         else:
             result.status = GateStatus.FAILED
 
-        logger.info(
-            f"Epic gate {result.status.value}: score={result.score:.2f}",
-            extra={
-                "epic_id": epic_id,
-                "score": result.score,
-                "status": result.status.value
-            }
-        )
+        # logger.info(
+        #   f"Epic gate {result.status.value}: score={result.score:.2f}",
+        #   extra={
+        #        "epic_id": epic_id,
+        #        "score": result.score,
+        #        "status": result.status.value
+        #    }
+        # )
 
         return result
 
@@ -341,33 +341,34 @@ class QualityGates:
         """
         Quality gate based on code review results.
 
-        Connects to the existing review system and determines
-        if rework is needed based on review scores.
+        DEPRECATED: session_quality_checks table no longer exists.
+        Quality metrics now stored in sessions.metrics JSONB field.
+        This function now returns SKIPPED status.
 
         Args:
             session_id: Session ID
             review_type: Type of review ("task", "epic", "project")
 
         Returns:
-            GateResult with pass/fail status and improvements
+            GateResult with SKIPPED status
         """
-        logger.info(f"Running review quality gate for session {session_id}")
-
         result = GateResult(
             gate_type=GateType.REVIEW,
-            status=GateStatus.PASSED,
+            status=GateStatus.SKIPPED,
             score=1.0
         )
+        return result
 
+        # OLD CODE - session_quality_checks table removed
         # Get review results from database
-        review = await self.db.pool.fetchrow("""
-            SELECT overall_rating, error_count, error_rate,
-                   critical_issues, warnings, metrics
-            FROM session_quality_checks
-            WHERE session_id = $1
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, session_id)
+        review = None  # await self.db.pool.fetchrow("""
+            # SELECT overall_rating, error_count, error_rate,
+            #        critical_issues, warnings, metrics
+            # FROM session_quality_checks
+            # WHERE session_id = $1
+            # ORDER BY created_at DESC
+            # LIMIT 1
+        # """, session_id)
 
         if not review:
             logger.warning(f"No review found for session {session_id}")
@@ -423,14 +424,14 @@ class QualityGates:
         else:
             result.status = GateStatus.FAILED
 
-        logger.info(
-            f"Review gate {result.status.value}: score={result.score:.2f}",
-            extra={
-                "session_id": str(session_id),
-                "score": result.score,
-                "status": result.status.value
-            }
-        )
+        # logger.info(
+        #    f"Review gate {result.status.value}: score={result.score:.2f}",
+        #    extra={
+        #        "session_id": str(session_id),
+        #        "score": result.score,
+        #        "status": result.status.value
+        #    }
+        # )
 
         return result
 
@@ -454,7 +455,7 @@ class QualityGates:
             List of created rework task IDs
         """
         if gate_result.passed:
-            logger.info(f"Gate passed for {entity_type} {entity_id}, no rework needed")
+            # logger.info(f"Gate passed for {entity_type} {entity_id}, no rework needed")
             return []
 
         logger.info(

@@ -44,11 +44,7 @@ from server.agent.agent import run_agent_session, SessionManager
 from server.utils.config import Config
 from server.sandbox.manager import SandboxManager
 from server.sandbox.hooks import set_active_sandbox, clear_active_sandbox
-from server.verification.integration import (
-    VerificationIntegration,
-    set_verification_integration,
-    VerificationConfig as VConfig
-)
+# Verification system removed - replaced by test execution in Phase 2
 
 # Initialize structured logging if not already done (for CLI usage)
 if not any(isinstance(h.formatter, type(None)) for h in get_logger(__name__).handlers):
@@ -251,7 +247,9 @@ class AgentOrchestrator:
                     has_env_variables = True
 
             # Determine if initialization is complete (Session 1 has created epics/tasks)
-            is_initialized = progress.get("total_epics", 0) > 0
+            # Handle both old and new field names for compatibility
+            total_epics = progress.get("total_epics", 0) or progress.get("epics_total", 0)
+            is_initialized = total_epics > 0
 
             # Determine if env configuration is needed
             # Only flag if .env.example exists AND has actual variables
@@ -404,6 +402,17 @@ class AgentOrchestrator:
             if not project:
                 raise ValueError(f"Project not found: {project_id}")
 
+            # Check if project is already complete
+            if project.get('completed_at'):
+                logger.info(f"✅ Project '{project['name']}' is already complete (completed_at: {project['completed_at']})")
+                logger.info("Not starting new coding sessions for completed project.")
+                # Return early with a message indicating project is complete
+                raise ValueError(
+                    f"Project '{project['name']}' is already marked as complete. "
+                    f"Completed at: {project['completed_at']}. "
+                    "No new sessions will be started."
+                )
+
             # Check if initialization is complete
             epics = await db.list_epics(project_id)
             if len(epics) == 0:
@@ -437,8 +446,20 @@ class AgentOrchestrator:
                 self.stop_after_current[project_id_str] = False
                 break
 
-            # Check if all epics are complete (more reliable than checking tasks)
+            # Check if project is already marked as complete
             async with DatabaseManager() as db:
+                project = await db.get_project(project_id)
+                if project and project.get('completed_at'):
+                    logger.info(f"✅ Project already marked as complete (completed_at: {project['completed_at']}). Stopping auto-continue.")
+                    # Notify via callback
+                    if self.event_callback:
+                        await self.event_callback(project_id, "project_already_complete", {
+                            "completed_at": str(project['completed_at']),
+                            "message": "Project was already marked as complete"
+                        })
+                    break
+
+                # Also check if all epics are complete (for projects not yet marked complete)
                 progress = await db.get_progress(project_id)
                 if progress:
                     completed_epics = progress.get('completed_epics', 0)
@@ -481,9 +502,11 @@ class AgentOrchestrator:
                 progress_callback=progress_callback
             )
 
-            # Check if session failed
-            if last_session.status in [SessionStatus.ERROR, SessionStatus.INTERRUPTED]:
+            # Check if session failed or was blocked
+            if last_session.status in [SessionStatus.ERROR, SessionStatus.INTERRUPTED, SessionStatus.BLOCKED]:
                 logger.info(f"Session ended with status {last_session.status}. Stopping auto-continue.")
+                if last_session.status == SessionStatus.BLOCKED:
+                    logger.info("⚠️ Epic test intervention required. Auto-continue stopped.")
                 break
 
             # Check if project is complete (all tasks done)
@@ -497,7 +520,44 @@ class AgentOrchestrator:
 
                     # Mark project as complete in database
                     await db.mark_project_complete(project_id)
-                    logger.info("✅ Project marked as complete in database")
+                    # logger.info("✅ Project marked as complete in database")
+
+                    # NOTE: Project Completion Review (Phase 7) is disabled for now
+                    # Current implementation compares spec to epics/tasks/tests (the plan),
+                    # not the actual working implementation. This is more useful as a
+                    # post-initialization check rather than a final completion check.
+                    # See YOKEFLOW_FUTURE_PLAN.md for plans to enhance this feature.
+                    #
+                    # To manually run a completion review, use the API endpoint:
+                    # POST /api/projects/{project_id}/completion-review
+                    #
+                    # try:
+                    #     logger.info("Triggering project completion review...")
+                    #     from server.quality.completion_analyzer import CompletionAnalyzer
+                    #
+                    #     analyzer = CompletionAnalyzer(use_semantic_matching=True)
+                    #     review = await analyzer.analyze_completion(project_id, db)
+                    #
+                    #     # Store in database
+                    #     review_id = await db.store_completion_review(project_id, review)
+                    #
+                    #     logger.info(
+                    #         f"Completion review finished: {review['recommendation'].upper()} "
+                    #         f"(score={review['overall_score']}, coverage={review['coverage_percentage']:.1f}%)"
+                    #     )
+                    #
+                    #     # Notify via callback
+                    #     if self.event_callback:
+                    #         await self.event_callback(project_id, "completion_review_complete", {
+                    #             "review_id": str(review_id),
+                    #             "score": review['overall_score'],
+                    #             "recommendation": review['recommendation'],
+                    #             "coverage_percentage": review['coverage_percentage']
+                    #         })
+                    #
+                    # except Exception as e:
+                    #     logger.error(f"Failed to generate completion review (non-fatal): {e}", exc_info=True)
+                    #     # Don't fail project completion if review fails
 
                     # Stop Docker container to free up ports
                     # This is best-effort - don't fail if container doesn't exist or can't be stopped
@@ -508,27 +568,12 @@ class AgentOrchestrator:
                             project_name = project.get('name')
                             logger.info(f"Stopping Docker container for completed project: {project_name}")
                             stopped = SandboxManager.stop_docker_container(project_name)
-                            if stopped:
-                                logger.info(f"✅ Docker container stopped successfully")
-                            else:
-                                logger.info(f"Docker container was not running or doesn't exist")
+                            #if stopped:
+                                #logger.info(f"✅ Docker container stopped successfully")
+                            #lse:
+                                #logger.info(f"Docker container was not running or doesn't exist")
                     except Exception as e:
                         logger.warning(f"Failed to stop Docker container (non-fatal): {e}")
-
-                    # Trigger final deep review on last session (if not already done recently)
-                    # This ensures we get a review even if project completes between 5-session intervals
-                    if last_session:
-                        # Get project path from database
-                        project = await db.get_project(project_id)
-                        if project and project.get('local_path'):
-                            project_path = Path(project['local_path'])
-                            logger.info("🔍 Triggering final deep review for completed project")
-                            await self.quality.maybe_trigger_deep_review(
-                                session_id=last_session.session_id,
-                                project_path=project_path,
-                                session_quality=None,  # Will check if needed based on interval
-                                force_final_review=True  # Override interval check for project completion
-                            )
 
                     # Notify via callback
                     if self.event_callback:
@@ -686,7 +731,7 @@ class AgentOrchestrator:
                 "ports": self.config.sandbox.docker_ports,
                 "session_type": session_type.value,  # "initializer" or "coding"
             }
-            logger.info(f"Creating {project_sandbox_type} sandbox for project {project_name}")
+            #logger.info(f"Creating {project_sandbox_type} sandbox for project {project_name}")
             sandbox = SandboxManager.create_sandbox(
                 sandbox_type=project_sandbox_type,  # Use project-specific, not global config
                 project_dir=project_path,
@@ -694,9 +739,39 @@ class AgentOrchestrator:
             )
 
             try:
-                # Start sandbox
-                logger.info(f"Starting {project_sandbox_type} sandbox for session {session_number}")
-                await sandbox.start()
+                # Start sandbox with timeout
+                # Docker sandbox setup can hang during package installation
+                sandbox_timeout = self.config.timing.sandbox_startup_timeout
+                logger.info(f"Starting {project_sandbox_type} sandbox (timeout: {sandbox_timeout}s)")
+
+                try:
+                    await asyncio.wait_for(sandbox.start(), timeout=sandbox_timeout)
+                except asyncio.TimeoutError:
+                    logger.error(f"Sandbox failed to start within {sandbox_timeout}s - likely hung during package installation")
+                    # Clean up the hung sandbox
+                    try:
+                        await sandbox.stop()
+                    except Exception:
+                        pass  # Ignore cleanup errors
+
+                    # For initialization, we should retry
+                    if is_initializer:
+                        # Notify via callback about sandbox failure
+                        if self.event_callback:
+                            await self.event_callback(project_id, "sandbox_timeout", {
+                                "message": "Docker sandbox setup timed out, likely due to package installation issues",
+                                "timeout_seconds": sandbox_timeout
+                            })
+
+                        # Mark session as error for retry
+                        await db.end_session(session_id, SessionStatus.ERROR.value,
+                                           error_message="Sandbox startup timeout",
+                                           metrics={"status": "sandbox_timeout"})
+
+                        raise RuntimeError(f"Sandbox failed to start within {sandbox_timeout}s. This may be due to network issues during package installation. Please try again.")
+                    else:
+                        raise
+
                 set_active_sandbox(sandbox)
 
                 # Get Docker container name if sandbox is Docker
@@ -759,7 +834,9 @@ class AgentOrchestrator:
 
                 # Get prompt based on session type and sandbox
                 if is_initializer:
-                    prompt = get_initializer_prompt(sandbox_type=sandbox_type)
+                    base_prompt = get_initializer_prompt()
+                    # Inject PROJECT_ID at the beginning of the prompt for easy access
+                    prompt = f"PROJECT_ID: {project_id}\n\n{base_prompt}"
                 elif resume_context:
                     # Include resume context in the prompt
                     base_prompt = get_coding_prompt(sandbox_type=sandbox_type)
@@ -783,41 +860,134 @@ class AgentOrchestrator:
 
                 heartbeat_task = asyncio.create_task(send_heartbeats())
 
-                # Initialize verification system if enabled for coding sessions
+                # DISABLED: Old verification system - replaced by MCP test execution in Phase 2
+                # The new workflow uses run_task_tests before update_task_status
                 epic_manager = None
-                if not is_initializer and self.config.verification.enabled:
-                    verification_integration = VerificationIntegration(
-                        project_path=project_path,
-                        db=db,
-                        enabled=self.config.verification.enabled,
-                        auto_retry=self.config.verification.auto_retry,
-                        max_retries=self.config.verification.max_retries
-                    )
-                    set_verification_integration(verification_integration)
-                    logger.info("Task verification system initialized")
+                # Verification system removed - function call deleted
 
-                    # Initialize epic manager for epic validation
-                    from server.verification.epic_manager import EpicManager
-                    epic_manager = EpicManager(db, project_path, self.config)
-                    logger.info("Epic validation system initialized")
-                else:
-                    set_verification_integration(None)
+                # Old code commented out:
+                # if not is_initializer and self.config.verification.enabled:
+                #     verification_integration = VerificationIntegration(
+                #         project_path=project_path,
+                #         db=db,
+                #         enabled=self.config.verification.enabled,
+                #         auto_retry=self.config.verification.auto_retry,
+                #         max_retries=self.config.verification.max_retries
+                #     )
+                #     set_verification_integration(verification_integration)
+                #     logger.info("Task verification system initialized")
+                #
+                #     # Initialize epic manager for epic validation
+                #     from server.verification.epic_manager import EpicManager
+                #     epic_manager = EpicManager(db, project_path, self.config)
+                #     logger.info("Epic validation system initialized")
+                # else:
+                #     set_verification_integration(None)
 
-                # Run session
+                # Run session with retry logic (no timeout on agent session)
+                max_retries = self.config.timing.initialization_max_retries
+
+                for attempt in range(max_retries):
+                    try:
+                        async with client:
+                            # Prepare intervention config
+                            intervention_config = {
+                                "enabled": self.config.intervention.enabled,
+                                "max_retries": self.config.intervention.max_retries,
+                                "environment": sandbox_type  # Pass sandbox type (docker or local)
+                            }
+
+                            # Run session - no timeout for initialization once sandbox is running
+                            # The real issue is sandbox startup, not the agent session
+                            if is_initializer:
+                                logger.info(f"Starting initialization session")
+
+                                # Notify UI about attempt if retrying
+                                if self.event_callback and attempt > 0:
+                                    await self.event_callback(project_id, "initialization_retry", {
+                                        "attempt": attempt + 1,
+                                        "max_retries": max_retries,
+                                        "message": f"Retrying initialization (attempt {attempt + 1}/{max_retries})"
+                                    })
+
+                                try:
+                                    # No timeout for initialization - let it run as long as needed
+                                    # The sandbox startup timeout catches the real issue
+                                    status, response, session_summary = await run_agent_session(
+                                        client, prompt, project_path, logger=session_logger, verbose=self.verbose,
+                                        session_manager=session_manager, progress_callback=progress_callback,
+                                        intervention_config=intervention_config
+                                    )
+                                    break  # Success, exit retry loop
+
+                                except Exception as e:
+                                    # This shouldn't happen anymore since we removed timeout
+                                    # But keep for other potential exceptions
+                                    if attempt < max_retries - 1:
+                                        logger.warning(f"Initialization failed with error: {e}, retrying...")
+
+                                        # Notify UI about failure and upcoming retry
+                                        if self.event_callback:
+                                            await self.event_callback(project_id, "initialization_error", {
+                                                "attempt": attempt + 1,
+                                                "will_retry": True,
+                                                "error": str(e),
+                                                "message": f"Initialization failed: {e}, retrying..."
+                                            })
+
+                                        # Recreate client for retry (the old one might be in a bad state)
+                                        client = create_client(
+                                            project_path,
+                                            current_model,
+                                            project_id=str(project_id),
+                                            docker_container=docker_container
+                                        )
+                                        await asyncio.sleep(5)  # Brief pause before retry
+                                        continue
+                                    else:
+                                        # Final attempt failed
+                                        logger.error(f"Initialization failed after {max_retries} attempts: {e}")
+
+                                        # Notify UI about final failure
+                                        if self.event_callback:
+                                            await self.event_callback(project_id, "initialization_failed", {
+                                                "attempts": max_retries,
+                                                "error": str(e),
+                                                "message": f"Initialization failed after multiple attempts: {e}"
+                                            })
+
+                                        status = "error"
+                                        response = f"Initialization failed: {e}"
+                                        session_summary = {"status": "error", "error": str(e)}
+                                        break
+                            else:
+                                # For coding sessions, no timeout (they can run for a long time)
+                                status, response, session_summary = await run_agent_session(
+                                    client, prompt, project_path, logger=session_logger, verbose=self.verbose,
+                                    session_manager=session_manager, progress_callback=progress_callback,
+                                    intervention_config=intervention_config
+                                )
+                                break
+
+                    except Exception as e:
+                        # Handle other exceptions during session
+                        if attempt < max_retries - 1 and is_initializer:
+                            logger.warning(f"Session failed with error: {e}, retrying...")
+                            await asyncio.sleep(5)
+                            # Recreate client for retry
+                            client = create_client(
+                                project_path,
+                                current_model,
+                                project_id=str(project_id),
+                                docker_container=docker_container
+                            )
+                            continue
+                        else:
+                            raise  # Re-raise if final attempt or not initializer
+
+                # Finally block should be outside the for loop
                 try:
-                    async with client:
-                        # Prepare intervention config
-                        intervention_config = {
-                            "enabled": self.config.intervention.enabled,
-                            "max_retries": self.config.intervention.max_retries,
-                            "environment": sandbox_type  # Pass sandbox type (docker or local)
-                        }
-
-                        status, response, session_summary = await run_agent_session(
-                            client, prompt, project_path, logger=session_logger, verbose=self.verbose,
-                            session_manager=session_manager, progress_callback=progress_callback,
-                            intervention_config=intervention_config
-                        )
+                    pass  # Nothing to do here
                 finally:
                     # Stop heartbeat task
                     if heartbeat_task:
@@ -827,33 +997,19 @@ class AgentOrchestrator:
                         except asyncio.CancelledError:
                             pass
 
-                # Build comprehensive metrics from session summary
-                metrics = {
-                    "duration_seconds": session_summary.get("duration_seconds", 0),
-                    "status": status,
-                    "message_count": session_summary.get("message_count", 0),
-                    "tool_calls_count": session_summary.get("tool_use_count", 0),
-                    "errors_count": session_summary.get("tool_errors", 0),
-                    "tasks_completed": session_summary.get("tasks_completed", 0),
-                    "tests_passed": session_summary.get("tests_passed", 0),
-                    "browser_verifications": session_summary.get("browser_verifications", 0),
-                    "response_length": session_summary.get("response_length", 0),
-                    # Token usage and cost from ResultMessage
-                    "tokens_input": session_summary.get("tokens_input", 0),
-                    "tokens_output": session_summary.get("tokens_output", 0),
-                    "tokens_cache_creation": session_summary.get("tokens_cache_creation", 0),
-                    "tokens_cache_read": session_summary.get("tokens_cache_read", 0),
-                }
-
-                # Add cost if available
-                if "cost_usd" in session_summary:
-                    metrics["cost_usd"] = session_summary["cost_usd"]
+                # Store session summary in database
+                # This includes all metrics from MetricsCollector plus quality scores
+                metrics = session_summary
 
                 # Update session info based on result
                 if status == "error":
                     session_info.status = SessionStatus.ERROR
                     session_info.error_message = response
                     await db.end_session(session_id, SessionStatus.ERROR.value, error_message=response, metrics=metrics)
+                elif status == "blocked":
+                    session_info.status = SessionStatus.BLOCKED
+                    session_info.error_message = "Epic test failure - intervention required"
+                    await db.end_session(session_id, SessionStatus.BLOCKED.value, error_message="Epic test failure - intervention required", metrics=metrics)
                 else:
                     session_info.status = SessionStatus.COMPLETED
                     await db.end_session(session_id, SessionStatus.COMPLETED.value, metrics=metrics)
@@ -875,55 +1031,18 @@ class AgentOrchestrator:
                         if validation_result:
                             # Log epic validation result
                             if validation_result.get("status") == "passed":
-                                logger.info(f"✅ Epic {epic_id} validation PASSED")
+                                #logger.info(f"✅ Epic {epic_id} validation PASSED")
                                 metrics["epic_validations_passed"] = 1
                             else:
                                 logger.warning(f"⚠️ Epic {epic_id} validation FAILED - rework tasks created")
                                 metrics["epic_validations_failed"] = 1
                                 metrics["rework_tasks_created"] = validation_result.get("rework_tasks_created", 0)
 
-                # Run quality gates if enabled (only for coding sessions)
-                quality_gates = None
-                if not is_initializer and self.config.verification.enabled and status != "error":
-                    from server.quality.gates import QualityGates
-                    quality_gates = QualityGates(db, project_path, self.config)
-
-                    # Run task quality gate if we completed a task
-                    current_task = session_summary.get("current_task")
-                    if current_task and current_task.get("id"):
-                        task_gate_result = await quality_gates.task_gate(
-                            task_id=str(current_task["id"]),
-                            session_id=session_id
-                        )
-
-                        # Create rework tasks if gate failed
-                        if not task_gate_result.passed:
-                            logger.warning(f"Task quality gate failed: score={task_gate_result.score:.2f}")
-                            rework_ids = await quality_gates.create_rework_tasks(
-                                gate_result=task_gate_result,
-                                entity_id=str(current_task["id"]),
-                                entity_type="task",
-                                session_id=session_id
-                            )
-                            metrics["quality_gate_failed"] = 1
-                            metrics["quality_rework_tasks"] = len(rework_ids)
-                        else:
-                            logger.info(f"Task quality gate passed: score={task_gate_result.score:.2f}")
-                            metrics["quality_gate_passed"] = 1
-
-                # Phase 1 Review System: Quick quality check (only for coding sessions)
-                # IMPORTANT: Run this BEFORE review gate so data is available
-                if not is_initializer:
-                    await self.quality.run_quality_check(session_id, project_path, session_logger, status, session_type)
-
-                    # Run review quality gate (after quality check has run)
-                    review_gate_result = await quality_gates.review_gate(
-                        session_id=session_id,
-                        review_type="task"
-                    )
-
-                    if review_gate_result.status != "skipped":
-                        metrics["review_gate_score"] = review_gate_result.score
+                # Trigger deep review if needed (only for coding sessions)
+                # The quality score and needs_deep_review are already calculated in session_summary
+                if not is_initializer and metrics.get("needs_deep_review", False):
+                    quality_score = metrics.get("quality_score", 0)
+                    await self.quality.maybe_trigger_deep_review(session_id, project_path, quality_score)
 
                 # Test Coverage Analysis: Run after initialization session
                 if is_initializer and status != "error":
@@ -958,27 +1077,58 @@ class AgentOrchestrator:
                 session_manager.set_current_logger(None)
 
             except Exception as e:
-                # Unexpected error
-                session_info.status = SessionStatus.ERROR
-                session_info.error_message = str(e)
-                session_info.ended_at = datetime.now()
+                # Check if this is an epic test intervention (not a real error)
+                error_msg = str(e)
 
-                duration = (session_info.ended_at - session_info.started_at).total_seconds() if session_info.started_at else 0
-                metrics = {"duration_seconds": duration, "status": "error"}
+                if "Epic test failure blocked" in error_msg:
+                    # This is a blocked session due to epic test failure
+                    session_info.status = SessionStatus.BLOCKED
+                    session_info.error_message = error_msg
+                    session_info.ended_at = datetime.now()
 
-                await db.end_session(
-                    session_id,
-                    SessionStatus.ERROR.value,
-                    error_message=str(e),
-                    metrics=metrics
-                )
+                    duration = (session_info.ended_at - session_info.started_at).total_seconds() if session_info.started_at else 0
+                    metrics = session_summary if 'session_summary' in locals() else {"duration_seconds": duration, "status": "blocked"}
 
-                # Log the error for debugging
-                logger.error(f"Session {session_id} failed with error: {e}", exc_info=True)
+                    await db.end_session(
+                        session_id,
+                        SessionStatus.BLOCKED.value,
+                        error_message=error_msg,
+                        metrics=metrics
+                    )
 
-                # Don't re-raise - return session_info with ERROR status instead
-                # This allows the API auto-continue loop to detect the error and stop
-                # (line 1247 in api/main.py checks session.status == "error")
+                    logger.warning(f"Session {session_id} blocked due to epic test failure")
+
+                    # Write blocker info to claude-progress.md
+                    await self._write_blocker_info(project_path, session_number, error_msg)
+
+                    # Notify via callback
+                    if self.event_callback:
+                        await self.event_callback(project_id, "session_blocked", {
+                            "session": session_info.to_dict(),
+                            "reason": error_msg
+                        })
+                else:
+                    # Unexpected error - existing handling
+                    session_info.status = SessionStatus.ERROR
+                    session_info.error_message = error_msg
+                    session_info.ended_at = datetime.now()
+
+                    duration = (session_info.ended_at - session_info.started_at).total_seconds() if session_info.started_at else 0
+                    metrics = {"duration_seconds": duration, "status": "error"}
+
+                    await db.end_session(
+                        session_id,
+                        SessionStatus.ERROR.value,
+                        error_message=error_msg,
+                        metrics=metrics
+                    )
+
+                    # Log the error for debugging
+                    logger.error(f"Session {session_id} failed with error: {e}", exc_info=True)
+
+                    # Don't re-raise - return session_info with ERROR status instead
+                    # This allows the API auto-continue loop to detect the error and stop
+                    # (line 1247 in api/main.py checks session.status == "error")
 
             finally:
                 # Stop sandbox
@@ -1168,7 +1318,54 @@ class AgentOrchestrator:
 
             # Delete project directory if it exists
             if project_path.exists():
-                shutil.rmtree(project_path)
+                try:
+                    # First attempt: normal deletion with custom error handler
+                    def handle_remove_readonly(func, path, exc):
+                        """Error handler for Windows/macOS readonly files."""
+                        import stat
+                        import os
+                        if not os.access(path, os.W_OK):
+                            # Add write permissions and retry
+                            os.chmod(path, stat.S_IWUSR | stat.S_IREAD)
+                            func(path)
+                        else:
+                            raise
+
+                    shutil.rmtree(project_path, onerror=handle_remove_readonly)
+                    logger.info(f"Successfully deleted project directory: {project_path}")
+                except (PermissionError, OSError) as e:
+                    logger.warning(f"Permission denied deleting {project_path}, attempting Docker-based removal")
+
+                    # Second attempt: use Docker to remove files created with root permissions
+                    try:
+                        import subprocess
+                        # Use a Docker container to remove the directory with root permissions
+                        # This handles cases where node_modules or other files were created by Docker
+                        docker_cmd = [
+                            "docker", "run", "--rm",
+                            "-v", f"{project_path.absolute()}:/workspace",
+                            "alpine:latest",
+                            "sh", "-c", "rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*"
+                        ]
+                        result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=30)
+
+                        if result.returncode == 0:
+                            # Docker removed the contents, now remove the empty directory
+                            # Use shutil.rmtree with ignore_errors in case some hidden files remain
+                            if project_path.exists():
+                                try:
+                                    project_path.rmdir()
+                                except OSError:
+                                    # If rmdir fails, try shutil.rmtree with ignore_errors
+                                    shutil.rmtree(project_path, ignore_errors=True)
+                            logger.info(f"Successfully deleted project directory using Docker: {project_path}")
+                        else:
+                            raise Exception(f"Docker removal failed: {result.stderr}")
+                    except Exception as docker_error:
+                        # Final fallback: delete with ignore_errors
+                        logger.error(f"Docker removal failed: {docker_error}, using ignore_errors fallback")
+                        shutil.rmtree(project_path, ignore_errors=True)
+                        logger.warning(f"Project directory partially deleted (some files may remain): {project_path}")
 
             return True
 
@@ -1179,6 +1376,75 @@ class AgentOrchestrator:
     def is_postgresql_configured(self) -> bool:
         """Check if PostgreSQL is configured."""
         return is_postgresql_configured()
+
+    async def _write_blocker_info(self, project_path: Path, session_number: int, error_msg: str) -> None:
+        """
+        Write epic test block information to claude-progress.md.
+
+        Args:
+            project_path: Path to project directory
+            session_number: Session number that was blocked
+            error_msg: Error message from epic test failure
+        """
+        try:
+            yokeflow_dir = project_path / "yokeflow"
+            yokeflow_dir.mkdir(exist_ok=True)
+
+            progress_file = yokeflow_dir / "claude-progress.md"
+
+            # Read existing content
+            existing_content = ""
+            if progress_file.exists():
+                existing_content = progress_file.read_text()
+
+            # Parse error message to extract details
+            # Error format: "Epic test failure blocked in {mode} mode: {reason}\nFailed tests: {tests}"
+            lines = error_msg.split('\n')
+            header_line = lines[0] if lines else error_msg
+            failed_tests_line = lines[1] if len(lines) > 1 else ""
+
+            # Create blocker entry
+            blocker_entry = f"""
+## ⚠️ Session {session_number} BLOCKED - Epic Test Failure
+
+**Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+**Status**: Session stopped due to epic test failure
+
+**Details**:
+```
+{error_msg}
+```
+
+**What This Means**:
+The session was automatically stopped because one or more epic tests failed in strict mode.
+Epic tests verify that completed functionality works correctly. The session cannot continue
+until these tests pass.
+
+**Next Steps**:
+1. Review the failed tests listed above
+2. Identify which implementation needs to be fixed
+3. Fix the code to make the tests pass
+4. You can resume the session after fixing the issues
+
+**For More Information**:
+- Check the session logs in `logs/session_{session_number:03d}_*.jsonl`
+- Review epic test results in the database
+- See QUALITY_PLAN.md for information about epic test blocking
+
+---
+
+"""
+
+            # Prepend to file (most recent first)
+            new_content = blocker_entry + existing_content
+
+            progress_file.write_text(new_content)
+            logger.info(f"✅ Wrote blocker info to {progress_file}")
+
+        except Exception as e:
+            logger.error(f"Failed to write blocker info to progress file: {e}")
+            # Don't raise - this is informational only
 
     async def cleanup_stale_sessions(self) -> int:
         """

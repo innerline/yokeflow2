@@ -5,6 +5,109 @@ All notable changes to YokeFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### Quality System Completion (January 31 - February 2, 2026)
+
+Complete implementation of the comprehensive quality system across 8 phases:
+
+**Phase 0: Database & Code Cleanup** (January 31, 2026)
+- Removed 34 unused database objects (16 tables + 18 views)
+- Clean schema: 21 tables, 19 views
+- Preserved essential code for future use
+- Complete documentation in code comments
+
+**Phase 1: Test Execution Recording** (January 31, 2026)
+- Database schema: `last_error_message`, `execution_time_ms`, `retry_count` fields
+- MCP tools enhanced: `update_task_test_result`, `update_epic_test_result`
+- Automatic retry count incrementation on failures
+- Performance indexes for slow/flaky test detection
+- Migration: `017_add_test_error_tracking.sql`
+
+**Phase 2: Epic Test Failure Tracking** (February 1, 2026)
+- `epic_test_failures` table (22 fields, 9 indexes)
+- 5 analysis views: quality, reliability, patterns, flaky tests, retry behavior
+- Auto-detection of flaky tests (passed before, now failing)
+- Classification: test quality vs implementation gaps
+- Agent retry behavior tracking
+- Migration: `018_epic_test_failure_tracking.sql`
+
+**Phase 3: Epic Test Blocking** (February 2, 2026)
+- Configuration in `.yokeflow.yaml` (strict/autonomous modes)
+- MCP tool integration with mode checking in `checkEpicCompletion()`
+- Orchestrator handles blocked sessions gracefully
+- Blocker info written to `claude-progress.md`
+- 5 passing tests in `test_epic_test_blocking.py`
+
+**Phase 4.1: Test Viewer UI** (February 2, 2026)
+- Epic and task tests visible with requirements
+- Fixed database queries for requirements-based testing
+- Updated TypeScript types (Test and EpicTest interfaces)
+- Tested and verified with Playwright
+- Component: `EpicAccordion.tsx` (lines 149-181)
+
+**Phase 5: Epic Re-testing** (February 2, 2026)
+- Smart epic selection with priority tiers (foundation, high-dependency, standard)
+- Automatic regression detection
+- Stability scoring (0.00-1.00) and analytics
+- 3 MCP tools: `trigger_epic_retest`, `record_epic_retest_result`, `get_epic_stability_metrics`
+- Database: 2 tables, 4 views, 8 indexes
+- Python: `epic_retest_manager.py` (450+ lines)
+- Migration: `019_add_epic_retesting.sql`
+- Catches regressions within 2 epics of breaking change
+
+**Phase 6: Enhanced Review Triggers** (February 2, 2026)
+- Removed periodic 5-session interval trigger
+- Added 7 quality-based trigger conditions:
+  1. Low quality score (< 7/10)
+  2. High error rate (> 10%)
+  3. High error count (30+)
+  4. Score/error mismatch
+  5. High adherence violations (5+)
+  6. Low verification rate (< 50%)
+  7. Repeated errors (3+ same error)
+- Implementation: `server/utils/observability.py:505-571`
+
+**Phase 7: Project Completion Review** (February 2, 2026)
+- Specification parser: `spec_parser.py` (450 lines, 25 tests)
+- Requirement matcher: `requirement_matcher.py` (550 lines, hybrid keyword + semantic)
+- Completion analyzer: `completion_analyzer.py` (400 lines)
+- Database: 2 tables, 4 views, 5 indexes
+- REST API: 5 new endpoints
+- Web UI: `CompletionReviewDashboard.tsx` (500 lines)
+- Automatic trigger on project completion
+- Overall score (1-100), coverage %, recommendation (complete/needs_work/failed)
+- Migration: `020_project_completion_reviews.sql`
+- Documentation: `PHASE_7_COMPLETE.md` (760 lines)
+
+**Phase 8: Prompt Improvement Aggregation** (60% complete, February 2, 2026)
+- Steps 8.1-8.2 complete: recommendation extraction and proposal generation
+- Aggregates by theme (8 themes), calculates confidence scores
+- Web UI dashboard: `PromptImprovementDashboard.tsx`
+- Step 8.3 deferred: Prompt versioning and A/B testing (4-7h)
+
+**Total Impact**:
+- 13 new files created for Phase 7
+- 7 database migrations (017-020+)
+- ~2,500 lines of new code for Phase 7
+- 25 tests for spec parser (more to be added)
+- Complete quality system from real-time metrics to completion verification
+
+#### AI-Powered Specification Generation (January 20, 2026)
+- **Natural language to specification** - Users can describe their app in plain English
+- **Claude Agent SDK integration** - Uses same authentication as main agent (claude-sonnet-4-5-20250929)
+- **Real-time streaming** - Server-Sent Events (SSE) for progressive generation display
+- **Context file support** - Upload mockups, requirements docs for enhanced generation
+- **Automatic validation** - Validates generated specs with errors, warnings, and suggestions
+- **SpecEditor component** - Full markdown editor with preview mode and syntax highlighting
+- **Dual mode UI** - Toggle between "Upload Spec" and "Generate with AI" in Create Project page
+- **Smart project type detection** - Automatically detects web, API, CLI, or data projects
+- **Patience messaging** - "This may take a few minutes" indicator during generation
+- **16 hours implementation** - Complete feature from planning to production
+- **Documentation**: `docs/ai-spec-generation.md` with full API reference
+
 ## [2.0.0] 2026-01-12
 
 ### Last minute additions

@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "tessl": {
-      "type": "stdio",
-      "command": "tessl",
-      "args": [
-        "mcp",
-        "start"
-      ]
-    },
     "task-manager": {
       "type": "stdio",
       "command": "node",
@@ -15,8 +7,7 @@
         "./mcp-task-manager/dist/index.js"
       ],
       "env": {
-        "DATABASE_URL": "postgresql://agent:agent_dev_password@localhost:5432/yokeflow",
-        "PROJECT_ID": "example-project-id"
+        "DATABASE_URL": "postgresql://agent:agent_dev_password@localhost:5432/yokeflow"
       }
     }
   }

@@ -974,7 +974,7 @@ class TaskDatabase:
                 # Get tests for this task
                 test_rows = await conn.fetch(
                     """
-                    SELECT * FROM tests
+                    SELECT * FROM task_tests
                     WHERE task_id = $1
                     ORDER BY id
                     """,
@@ -1086,7 +1086,7 @@ class TaskDatabase:
         async with self.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO tests (task_id, project_id, category, description, steps)
+                INSERT INTO task_tests (task_id, project_id, category, description, steps)
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING *
                 """,
@@ -1114,7 +1114,7 @@ class TaskDatabase:
         async with self.acquire() as conn:
             await conn.execute(
                 """
-                UPDATE tests
+                UPDATE task_tests
                 SET passes = $1,
                     verified_at = CASE WHEN $1 THEN NOW() ELSE NULL END,
                     session_id = COALESCE($2, session_id),
@@ -1150,7 +1150,35 @@ class TaskDatabase:
             )
 
             if row:
-                return dict(row)
+                # Map database view field names to frontend-expected names
+                # The view uses total_epics, completed_epics, total_tasks, etc.
+                # The frontend also expects total_epics, total_tasks, etc.
+                progress = dict(row)
+
+                # Get individual test counts
+                task_tests_total = int(progress.get("total_task_tests", 0))
+                task_tests_passing = int(progress.get("passing_task_tests", 0))
+                epic_tests_total = int(progress.get("total_epic_tests", 0))
+                epic_tests_passing = int(progress.get("passing_epic_tests", 0))
+
+                return {
+                    "project_id": progress.get("project_id"),
+                    "project_name": progress.get("project_name"),
+                    "total_epics": int(progress.get("total_epics", 0)),
+                    "completed_epics": int(progress.get("completed_epics", 0)),
+                    "total_tasks": int(progress.get("total_tasks", 0)),
+                    "completed_tasks": int(progress.get("completed_tasks", 0)),
+                    # Include individual test counts for API normalize function
+                    "total_task_tests": task_tests_total,
+                    "passing_task_tests": task_tests_passing,
+                    "total_epic_tests": epic_tests_total,
+                    "passing_epic_tests": epic_tests_passing,
+                    # Combined totals (will be recalculated by normalize function)
+                    "total_tests": task_tests_total + epic_tests_total,
+                    "passing_tests": task_tests_passing + epic_tests_passing,
+                    "task_completion_pct": float(progress.get("task_completion_pct", 0)),
+                    "test_pass_pct": float(progress.get("test_pass_pct", 0)),
+                }
             else:
                 # Return empty stats if no data
                 return {
@@ -1221,11 +1249,14 @@ class TaskDatabase:
 
             task = dict(task_row)
 
-            # Get tests for this task
+            # Get tests for this task (requirements-based approach)
             tests = await conn.fetch(
                 """
-                SELECT *
-                FROM tests
+                SELECT id, task_id, category, description, steps, passes,
+                       test_type, requirements, success_criteria, verification_notes,
+                       created_at, verified_at,
+                       last_execution, last_result, execution_log
+                FROM task_tests
                 WHERE task_id = $1
                 ORDER BY category, id
                 """,
@@ -1274,7 +1305,7 @@ class TaskDatabase:
                     COUNT(ts.id) as test_count,
                     SUM(CASE WHEN ts.passes = true THEN 1 ELSE 0 END) as passing_test_count
                 FROM tasks t
-                LEFT JOIN tests ts ON t.id = ts.task_id
+                LEFT JOIN task_tests ts ON t.id = ts.task_id
                 WHERE t.epic_id = $1
                 GROUP BY t.id
                 ORDER BY t.priority, t.id
@@ -1283,7 +1314,87 @@ class TaskDatabase:
             )
             epic['tasks'] = [dict(task) for task in tasks]
 
+            # Get epic tests
+            epic_tests = await conn.fetch(
+                """
+                SELECT id, epic_id, name, description, test_type,
+                       requirements, success_criteria, key_verification_points,
+                       depends_on_tasks, last_execution, last_result, execution_log,
+                       created_at, updated_at
+                FROM epic_tests
+                WHERE epic_id = $1
+                ORDER BY created_at
+                """,
+                epic_id
+            )
+            epic['epic_tests'] = [dict(test) for test in epic_tests]
+
             return epic
+
+    async def get_epic_tests(
+        self,
+        epic_id: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all epic-level integration tests for an epic.
+
+        Args:
+            epic_id: Epic ID
+
+        Returns:
+            List of epic test records
+        """
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, epic_id, name, description, test_type,
+                       requirements, success_criteria, key_verification_points,
+                       depends_on_tasks, last_execution, last_result, execution_log,
+                       created_at, updated_at
+                FROM epic_tests
+                WHERE epic_id = $1
+                ORDER BY created_at
+                """,
+                epic_id
+            )
+            return [dict(row) for row in rows]
+
+    async def get_epic_tests_stats(
+        self,
+        project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Get epic test statistics for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Dictionary with epic test statistics
+        """
+        async with self.acquire() as conn:
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as total_epic_tests,
+                    COUNT(CASE WHEN last_result = 'passed' THEN 1 END) as passed,
+                    COUNT(CASE WHEN last_result = 'failed' THEN 1 END) as failed,
+                    COUNT(CASE WHEN last_result = 'skipped' THEN 1 END) as skipped,
+                    COUNT(CASE WHEN last_execution IS NOT NULL THEN 1 END) as executed
+                FROM epic_tests
+                WHERE epic_id IN (
+                    SELECT id FROM epics WHERE project_id = $1
+                )
+                """,
+                project_id
+            )
+            return dict(stats) if stats else {
+                'total_epic_tests': 0,
+                'passed': 0,
+                'failed': 0,
+                'skipped': 0,
+                'executed': 0
+            }
 
     # =========================================================================
     # Session Quality Checks (Phase 1 Review System Integration)
@@ -1291,61 +1402,8 @@ class TaskDatabase:
     # Note: Legacy methods removed in cleanup (create_review, record_github_commit,
     #       get/update_project_preferences) - tables were never used
 
-    async def store_quality_check(
-        self,
-        session_id: UUID,
-        metrics: Dict[str, Any],
-        critical_issues: List[str],
-        warnings: List[str],
-        overall_rating: Optional[int] = None,
-        check_version: str = "1.0"
-    ) -> UUID:
-        """
-        Store quality check results for a session (quick checks only).
-
-        Args:
-            session_id: Session UUID
-            metrics: Full metrics dict from review_metrics.analyze_session_logs()
-            critical_issues: List of critical issue strings
-            warnings: List of warning strings
-            overall_rating: Optional 1-10 quality score
-            check_version: Version of quality check logic
-
-        Returns:
-            UUID of created quality check record
-        """
-        async with self.acquire() as conn:
-            # Extract key metrics for indexed columns
-            playwright_count = metrics.get('playwright_count', 0)
-            playwright_screenshot_count = metrics.get('playwright_screenshot_count', 0)
-            total_tool_uses = metrics.get('total_tool_uses', 0)
-            error_count = metrics.get('error_count', 0)
-            error_rate = metrics.get('error_rate', 0.0)
-
-            check_id = await conn.fetchval(
-                """
-                INSERT INTO session_quality_checks (
-                    session_id,
-                    check_version,
-                    overall_rating,
-                    playwright_count,
-                    playwright_screenshot_count,
-                    total_tool_uses,
-                    error_count,
-                    error_rate,
-                    critical_issues,
-                    warnings,
-                    metrics
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                RETURNING id
-                """,
-                session_id, check_version, overall_rating,
-                playwright_count, playwright_screenshot_count, total_tool_uses,
-                error_count, error_rate,
-                json.dumps(critical_issues), json.dumps(warnings), json.dumps(metrics)
-            )
-            return check_id
+    # Removed: store_quality_check() - session_quality_checks table no longer exists
+    # Quality metrics now stored in sessions.metrics JSONB field
 
     async def store_deep_review(
         self,
@@ -1418,100 +1476,56 @@ class TaskDatabase:
         include_deep_review: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
-        Get quality check results for a session.
+        Get quality data for a session.
 
-        Now queries both session_quality_checks and session_deep_reviews tables.
+        NOTE: session_quality_checks table has been removed. This now only returns
+        deep review data. Quick metrics are in sessions.metrics JSONB field.
 
         Args:
             session_id: Session UUID
-            include_deep_review: If True, also fetch deep review data (default: True)
+            include_deep_review: Deprecated, always returns deep review if available
 
         Returns:
-            Quality check dict with optional deep review fields, or None if not found
+            Deep review dict, or None if not found
         """
         async with self.acquire() as conn:
-            # Get quick check
-            quick_check = await conn.fetchrow(
+            # Get deep review
+            deep_review = await conn.fetchrow(
                 """
                 SELECT
                     id,
                     session_id,
-                    check_version,
+                    review_version,
                     created_at,
                     overall_rating,
-                    playwright_count,
-                    playwright_screenshot_count,
-                    total_tool_uses,
-                    error_count,
-                    error_rate,
-                    critical_issues,
-                    warnings,
-                    metrics
-                FROM session_quality_checks
+                    review_text,
+                    review_summary,
+                    prompt_improvements,
+                    model
+                FROM session_deep_reviews
                 WHERE session_id = $1
                 ORDER BY created_at DESC LIMIT 1
                 """,
                 session_id
             )
 
-            if not quick_check:
+            if not deep_review:
                 return None
 
             # Convert to dict
-            result = dict(quick_check)
-            result['check_type'] = 'quick'  # Add for backwards compatibility
+            result = dict(deep_review)
+            result['check_type'] = 'deep'  # For backwards compatibility
 
-            # Parse JSONB fields
-            jsonb_fields = ['critical_issues', 'warnings', 'metrics']
-            for field in jsonb_fields:
-                if field in result and isinstance(result[field], str):
+            # Parse JSONB fields from deep review
+            for field in ['review_summary', 'prompt_improvements']:
+                value = deep_review[field]
+                if isinstance(value, str):
                     try:
-                        result[field] = json.loads(result[field])
+                        result[field] = json.loads(value)
                     except (json.JSONDecodeError, TypeError):
-                        result[field] = [] if field in ['critical_issues', 'warnings'] else {}
-
-            # Get deep review if requested
-            if include_deep_review:
-                deep_review = await conn.fetchrow(
-                    """
-                    SELECT
-                        id as review_id,
-                        review_version,
-                        created_at as review_created_at,
-                        overall_rating as review_rating,
-                        review_text,
-                        review_summary,
-                        prompt_improvements,
-                        model
-                    FROM session_deep_reviews
-                    WHERE session_id = $1
-                    ORDER BY created_at DESC LIMIT 1
-                    """,
-                    session_id
-                )
-
-                if deep_review:
-                    # Add deep review fields
-                    result['has_deep_review'] = True
-                    result['review_id'] = deep_review['review_id']
-                    result['review_version'] = deep_review['review_version']
-                    result['review_created_at'] = deep_review['review_created_at']
-                    result['review_rating'] = deep_review['review_rating']
-                    result['review_text'] = deep_review['review_text']
-                    result['model'] = deep_review['model']
-
-                    # Parse JSONB fields from deep review
-                    for field in ['review_summary', 'prompt_improvements']:
-                        value = deep_review[field]
-                        if isinstance(value, str):
-                            try:
-                                result[field] = json.loads(value)
-                            except (json.JSONDecodeError, TypeError):
-                                result[field] = {} if field == 'review_summary' else []
-                        else:
-                            result[field] = value
+                        result[field] = {} if field == 'review_summary' else []
                 else:
-                    result['has_deep_review'] = False
+                    result[field] = value
 
             return result
 
@@ -1522,30 +1536,25 @@ class TaskDatabase:
         """
         Get overall quality summary for a project.
 
-        Returns aggregate statistics across all sessions.
+        NOTE: v_project_quality view has been removed. This now returns minimal data.
+        Quality metrics are stored per-session in sessions.metrics JSONB field.
 
         Args:
             project_id: Project UUID
 
         Returns:
-            Dict with quality summary stats
+            Dict with empty quality stats (for backwards compatibility)
         """
-        async with self.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM v_project_quality WHERE project_id = $1
-                """,
-                project_id
-            )
-            return dict(row) if row else {
-                'project_id': str(project_id),
-                'total_sessions': 0,
-                'checked_sessions': 0,
-                'avg_quality_rating': None,
-                'sessions_without_browser_verification': 0,
-                'avg_error_rate_percent': None,
-                'avg_playwright_calls_per_session': None
-            }
+        # Return empty stats - the view no longer exists
+        return {
+            'project_id': str(project_id),
+            'total_sessions': 0,
+            'checked_sessions': 0,
+            'avg_quality_rating': None,
+            'sessions_without_browser_verification': 0,
+            'avg_error_rate_percent': None,
+            'avg_playwright_calls_per_session': None
+        }
 
     async def list_deep_reviews(
         self,
@@ -1605,25 +1614,18 @@ class TaskDatabase:
         """
         Get recent sessions with quality issues.
 
+        NOTE: v_recent_quality_issues view has been removed.
+        Returns empty list for backwards compatibility.
+
         Args:
             project_id: Optional filter by project
             limit: Maximum number of sessions to return
 
         Returns:
-            List of session dicts with quality issues
+            Empty list (view no longer exists)
         """
-        async with self.acquire() as conn:
-            query = "SELECT * FROM v_recent_quality_issues"
-
-            if project_id:
-                query += " WHERE project_id = $1"
-                query += f" LIMIT {limit}"
-                rows = await conn.fetch(query, project_id)
-            else:
-                query += f" LIMIT {limit}"
-                rows = await conn.fetch(query)
-
-            return [dict(row) for row in rows]
+        # View removed - return empty list
+        return []
 
     async def get_browser_verification_compliance(
         self,
@@ -1632,32 +1634,26 @@ class TaskDatabase:
         """
         Get browser verification compliance stats for a project.
 
-        Returns breakdown of sessions by Playwright usage level.
+        NOTE: v_browser_verification_compliance view has been removed.
+        Returns empty stats for backwards compatibility.
 
         Args:
             project_id: Project UUID
 
         Returns:
-            Dict with compliance statistics
+            Dict with empty compliance statistics
         """
-        async with self.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM v_browser_verification_compliance
-                WHERE project_id = $1
-                """,
-                project_id
-            )
-            return dict(row) if row else {
-                'project_id': str(project_id),
-                'total_sessions': 0,
-                'sessions_with_verification': 0,
-                'sessions_excellent_verification': 0,
-                'sessions_good_verification': 0,
-                'sessions_minimal_verification': 0,
-                'sessions_no_verification': 0,
-                'verification_rate_percent': 0.0
-            }
+        # View removed - return empty stats
+        return {
+            'project_id': str(project_id),
+            'total_sessions': 0,
+            'sessions_with_verification': 0,
+            'sessions_excellent_verification': 0,
+            'sessions_good_verification': 0,
+            'sessions_minimal_verification': 0,
+            'sessions_no_verification': 0,
+            'verification_rate_percent': 0.0
+        }
 
     # =========================================================================
     # Prompt Improvement Operations
@@ -2626,6 +2622,451 @@ class TaskDatabase:
                 )
 
             return [dict(row) for row in rows]
+
+    # =========================================================================
+    # Epic Re-testing Operations (Phase 5 - Quality System)
+    # =========================================================================
+
+    async def get_completed_epic_count(self, project_id: UUID) -> int:
+        """
+        Get count of completed epics in a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Number of completed epics
+        """
+        async with self.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM epics
+                WHERE project_id = $1 AND status = 'completed'
+                """,
+                project_id
+            )
+            return count or 0
+
+    async def get_epic_retest_runs(
+        self,
+        project_id: UUID,
+        epic_id: Optional[int] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get epic re-test history.
+
+        Args:
+            project_id: Project UUID
+            epic_id: Filter by specific epic (None = all)
+            limit: Maximum records to return
+
+        Returns:
+            List of re-test run dicts
+        """
+        async with self.acquire() as conn:
+            if epic_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT err.*
+                    FROM v_epic_retest_history err
+                    JOIN epics e ON err.epic_id = e.id
+                    WHERE e.project_id = $1 AND err.epic_id = $2
+                    ORDER BY err.created_at DESC
+                    LIMIT $3
+                    """,
+                    project_id, epic_id, limit
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT err.*
+                    FROM v_epic_retest_history err
+                    JOIN epics e ON err.epic_id = e.id
+                    WHERE e.project_id = $1
+                    ORDER BY err.created_at DESC
+                    LIMIT $2
+                    """,
+                    project_id, limit
+                )
+
+            return [dict(row) for row in rows]
+
+    async def get_epic_stability_metrics(
+        self,
+        project_id: UUID,
+        epic_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get epic stability metrics.
+
+        Args:
+            project_id: Project UUID
+            epic_id: Filter by specific epic (None = all)
+
+        Returns:
+            List of stability metric dicts
+        """
+        async with self.acquire() as conn:
+            if epic_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT esm.*
+                    FROM v_epic_stability_summary esm
+                    WHERE epic_id IN (
+                        SELECT id FROM epics WHERE project_id = $1
+                    ) AND esm.epic_id = $2
+                    """,
+                    project_id, epic_id
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT esm.*
+                    FROM v_epic_stability_summary esm
+                    WHERE epic_id IN (
+                        SELECT id FROM epics WHERE project_id = $1
+                    )
+                    ORDER BY priority DESC, stability_score ASC
+                    """,
+                    project_id
+                )
+
+            return [dict(row) for row in rows]
+
+    async def get_regressions_by_epic(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        Get list of epics that have caused regressions.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of epics with regression counts
+        """
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT rbe.*
+                FROM v_regressions_by_epic rbe
+                WHERE epic_id IN (
+                    SELECT id FROM epics WHERE project_id = $1
+                )
+                ORDER BY regressions_caused DESC
+                """,
+                project_id
+            )
+
+            return [dict(row) for row in rows]
+
+    async def record_epic_retest(
+        self,
+        epic_id: int,
+        triggered_by_epic_id: Optional[int],
+        session_id: Optional[UUID],
+        test_result: str,
+        is_regression: bool = False,
+        execution_time_ms: Optional[int] = None,
+        error_details: Optional[str] = None,
+        tests_run: int = 0,
+        tests_passed: int = 0,
+        tests_failed: int = 0,
+        selection_reason: Optional[str] = None
+    ) -> UUID:
+        """
+        Record an epic re-test result.
+
+        Uses the record_epic_retest() database function which:
+        - Auto-detects regressions
+        - Updates stability metrics
+        - Calculates stability scores
+
+        Args:
+            epic_id: Epic that was re-tested
+            triggered_by_epic_id: Epic that triggered the re-test
+            session_id: Session that ran the re-test
+            test_result: 'passed', 'failed', 'skipped', 'error'
+            is_regression: Was passing, now failing
+            execution_time_ms: Test execution time
+            error_details: Error message if failed
+            tests_run: Number of tests executed
+            tests_passed: Number of tests passed
+            tests_failed: Number of tests failed
+            selection_reason: Why this epic was selected
+
+        Returns:
+            UUID of created retest run record
+        """
+        async with self.acquire() as conn:
+            retest_id = await conn.fetchval(
+                """
+                SELECT record_epic_retest(
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+                )
+                """,
+                epic_id,
+                triggered_by_epic_id,
+                session_id,
+                test_result,
+                is_regression,
+                execution_time_ms,
+                error_details,
+                tests_run,
+                tests_passed,
+                tests_failed,
+                selection_reason
+            )
+
+            return retest_id
+
+    # =========================================================================
+    # Project Completion Review Methods (Phase 7)
+    # =========================================================================
+
+    @with_retry()
+    async def store_completion_review(
+        self,
+        project_id: UUID,
+        review_data: Dict[str, Any]
+    ) -> UUID:
+        """
+        Store completion review and requirements in database.
+
+        Args:
+            project_id: Project UUID
+            review_data: Review data from CompletionAnalyzer
+
+        Returns:
+            UUID of created review
+        """
+        logger.info(f"Storing completion review for project {project_id}")
+
+        async with self.transaction() as conn:
+            # Insert review
+            review_id = await conn.fetchval(
+                """
+                INSERT INTO project_completion_reviews (
+                    project_id, spec_file_path, spec_hash, spec_parsed_at,
+                    requirements_total, requirements_met, requirements_missing,
+                    requirements_extra, coverage_percentage, overall_score,
+                    recommendation, executive_summary, review_text, review_model
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                RETURNING id
+                """,
+                project_id,
+                review_data['spec_file_path'],
+                review_data['spec_hash'],
+                datetime.fromisoformat(review_data['spec_parsed_at']),
+                review_data['requirements_total'],
+                review_data['requirements_met'],
+                review_data['requirements_missing'],
+                review_data['requirements_extra'],
+                review_data['coverage_percentage'],
+                review_data['overall_score'],
+                review_data['recommendation'],
+                review_data['executive_summary'],
+                review_data['review_text'],
+                review_data['review_model']
+            )
+
+            # Insert requirements
+            matches = review_data.get('matches', [])
+            for match in matches:
+                await conn.execute(
+                    """
+                    INSERT INTO completion_requirements (
+                        review_id, requirement_id, section, requirement_text,
+                        keywords, priority, status, matched_epic_ids,
+                        matched_task_ids, match_confidence, implementation_notes
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    """,
+                    review_id,
+                    match.requirement.id,
+                    match.requirement.section,
+                    match.requirement.text,
+                    match.requirement.keywords,
+                    match.requirement.priority,
+                    match.status,
+                    match.matched_epic_ids,
+                    match.matched_task_ids,
+                    match.match_confidence,
+                    match.implementation_notes
+                )
+
+            logger.info(
+                f"Stored completion review {review_id} with "
+                f"{len(matches)} requirements"
+            )
+
+            return review_id
+
+    @with_retry()
+    async def get_completion_review(
+        self,
+        project_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get latest completion review for project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Review data with requirements, or None if not found
+        """
+        async with self.acquire() as conn:
+            # Get review
+            review = await conn.fetchrow(
+                """
+                SELECT * FROM v_latest_completion_review
+                WHERE project_id = $1
+                """,
+                project_id
+            )
+
+            if not review:
+                return None
+
+            # Get requirements
+            requirements = await conn.fetch(
+                """
+                SELECT
+                    requirement_id, section, requirement_text, keywords,
+                    priority, status, matched_epic_ids, matched_task_ids,
+                    match_confidence, implementation_notes
+                FROM completion_requirements
+                WHERE review_id = $1
+                ORDER BY section, requirement_id
+                """,
+                review['id']
+            )
+
+            return {
+                **dict(review),
+                'requirements': [dict(r) for r in requirements]
+            }
+
+    @with_retry()
+    async def list_completion_reviews(
+        self,
+        project_id: Optional[UUID] = None,
+        recommendation: Optional[str] = None,
+        min_score: Optional[int] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        List completion reviews with optional filters.
+
+        Args:
+            project_id: Filter by project (optional)
+            recommendation: Filter by recommendation (complete/needs_work/failed)
+            min_score: Filter by minimum score
+            limit: Maximum number of results
+
+        Returns:
+            List of review summaries
+        """
+        conditions = []
+        params = []
+        param_num = 1
+
+        if project_id:
+            conditions.append(f"project_id = ${param_num}")
+            params.append(project_id)
+            param_num += 1
+
+        if recommendation:
+            conditions.append(f"recommendation = ${param_num}")
+            params.append(recommendation)
+            param_num += 1
+
+        if min_score is not None:
+            conditions.append(f"overall_score >= ${param_num}")
+            params.append(min_score)
+            param_num += 1
+
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+        async with self.acquire() as conn:
+            reviews = await conn.fetch(
+                f"""
+                SELECT * FROM v_project_completion_stats
+                WHERE {where_clause}
+                ORDER BY review_created_at DESC
+                LIMIT ${param_num}
+                """,
+                *params,
+                limit
+            )
+
+            return [dict(r) for r in reviews]
+
+    @with_retry()
+    async def get_completion_requirements_by_section(
+        self,
+        review_id: UUID
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get requirements grouped by section for a review.
+
+        Args:
+            review_id: Review UUID
+
+        Returns:
+            Dict mapping section name to list of requirements
+        """
+        async with self.acquire() as conn:
+            requirements = await conn.fetch(
+                """
+                SELECT
+                    requirement_id, section, requirement_text, keywords,
+                    priority, status, matched_epic_ids, matched_task_ids,
+                    match_confidence, implementation_notes
+                FROM completion_requirements
+                WHERE review_id = $1
+                ORDER BY section, priority DESC, requirement_id
+                """,
+                review_id
+            )
+
+            # Group by section
+            by_section: Dict[str, List[Dict[str, Any]]] = {}
+            for req in requirements:
+                section = req['section']
+                if section not in by_section:
+                    by_section[section] = []
+                by_section[section].append(dict(req))
+
+            return by_section
+
+    @with_retry()
+    async def get_completion_section_summary(
+        self,
+        review_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get section-level summary for a completion review.
+
+        Args:
+            review_id: Review UUID
+
+        Returns:
+            List of section summaries with counts and confidence
+        """
+        async with self.acquire() as conn:
+            sections = await conn.fetch(
+                """
+                SELECT * FROM v_completion_section_summary
+                WHERE review_id = $1
+                ORDER BY section
+                """,
+                review_id
+            )
+
+            return [dict(s) for s in sections]
 
 
 # =============================================================================

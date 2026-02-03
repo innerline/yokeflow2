@@ -21,7 +21,9 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Dict
+
+from server.utils.metrics_collector import MetricsCollector
 
 
 def format_duration(seconds: float) -> str:
@@ -55,7 +57,7 @@ class SessionLogger:
     - session_{iteration}_{timestamp}.txt: Human-readable narrative
     """
 
-    def __init__(self, log_dir: Path, session_number: int, session_type: str, model: str = None, prompt_file: str = None, event_callback=None):
+    def __init__(self, log_dir: Path, session_number: int, session_type: str, model: str = None, prompt_file: str = None, sandbox_type: str = "local", event_callback=None):
         """
         Initialize session logger.
 
@@ -65,6 +67,7 @@ class SessionLogger:
             session_type: "initializer" or "coding"
             model: Claude model being used (e.g., "claude-opus-4-5-20251101")
             prompt_file: Prompt file used (e.g., "initializer_prompt_local.md")
+            sandbox_type: Sandbox type ("docker" or "local", default: "local")
             event_callback: Optional callback function(event_type, data) for real-time events
         """
         self.log_dir = Path(log_dir)
@@ -79,6 +82,7 @@ class SessionLogger:
 
         self.session_number = session_number
         self.session_type = session_type
+        self.sandbox_type = sandbox_type
         self.model = model
         self.prompt_file = prompt_file
         self.start_time = time.time()
@@ -87,10 +91,8 @@ class SessionLogger:
         self.tool_errors = 0
         self.event_callback = event_callback
 
-        # Track session metrics for analysis
-        self.tasks_completed = 0
-        self.tests_passed = 0
-        self.browser_verifications = 0
+        # Use MetricsCollector for all metrics tracking, pass sandbox_type
+        self.metrics = MetricsCollector(sandbox_type=sandbox_type)
 
         # Track token usage (estimated from character counts)
         # Rough estimate: 1 token ≈ 4 characters for English text
@@ -100,6 +102,9 @@ class SessionLogger:
 
         # Track tool_id -> (tool_name, tool_input) mapping for event emission
         self.tool_map = {}
+
+        # Track tool execution times for long-running detection
+        self.tool_start_times = {}  # tool_use_id -> timestamp
 
         # Initialize files
         self._init_files()
@@ -202,13 +207,21 @@ class SessionLogger:
         self.tool_use_count += 1
         timestamp = datetime.now().isoformat()
 
+        # Track tool start time for duration calculation
+        self.tool_start_times[tool_id] = timestamp
+
+        # Use MetricsCollector for enhanced tracking
+        self.metrics.track_tool_use(tool_name, tool_id, tool_input)
+
         self._write_jsonl({
             "event": "tool_use",
             "timestamp": timestamp,
             "tool_number": self.tool_use_count,
             "tool_name": tool_name,
             "tool_id": tool_id,
-            "input": tool_input
+            "tool_use_id": tool_id,  # For compatibility with metrics parsing
+            "input": tool_input,
+            "parameters": tool_input  # Some code expects this field
         })
 
         self._write_txt(f"[Tool Use #{self.tool_use_count}: {tool_name}]\n")
@@ -239,16 +252,53 @@ class SessionLogger:
 
     def log_tool_result(self, tool_id: str, content: Any, is_error: bool):
         """Log tool result."""
+        timestamp = datetime.now().isoformat()
+
         if is_error:
             self.tool_errors += 1
+            # Track error in metrics collector (could enhance to categorize errors)
+            error_type = "general"
+            if "TimeoutError" in str(content):
+                error_type = "timeout"
+            elif "PermissionError" in str(content):
+                error_type = "permission"
+            elif "FileNotFoundError" in str(content):
+                error_type = "file_not_found"
+        else:
+            error_type = None
 
-        self._write_jsonl({
+        # Track result in metrics collector
+        self.metrics.track_tool_result(tool_id, is_error, error_type, str(content) if is_error else None)
+
+        # No task classification needed - test types come from database
+
+        # Calculate tool duration if we have start time
+        duration_seconds = None
+        if tool_id in self.tool_start_times:
+            try:
+                start_time = datetime.fromisoformat(self.tool_start_times[tool_id])
+                end_time = datetime.fromisoformat(timestamp)
+                duration_seconds = (end_time - start_time).total_seconds()
+
+                # Track long-running tools in metrics
+                if duration_seconds > 30:
+                    self.metrics.long_running_tools += 1
+            except (ValueError, TypeError):
+                pass
+
+        event_data = {
             "event": "tool_result",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": timestamp,
             "tool_id": tool_id,
+            "tool_use_id": tool_id,  # For compatibility
             "is_error": is_error,
             "content": str(content)[:1000] if not is_error else str(content)  # Full error text
-        })
+        }
+
+        if duration_seconds is not None:
+            event_data["duration_seconds"] = duration_seconds
+
+        self._write_jsonl(event_data)
 
         # Human-readable log
         if is_error:
@@ -268,10 +318,6 @@ class SessionLogger:
 
             # Emit event for task status updates
             if tool_name == "mcp__task-manager__update_task_status":
-                # Increment tasks_completed if task is marked as done
-                if tool_input.get("done"):
-                    self.tasks_completed += 1
-
                 self._emit_event("task_updated", {
                     "task_id": tool_input.get("task_id"),
                     "done": tool_input.get("done"),
@@ -280,45 +326,13 @@ class SessionLogger:
 
             # Emit event for test result updates
             elif tool_name == "mcp__task-manager__update_test_result":
-                # Increment tests_passed if test passes
-                if tool_input.get("passes"):
-                    self.tests_passed += 1
-
                 self._emit_event("test_updated", {
                     "test_id": tool_input.get("test_id"),
                     "passes": tool_input.get("passes"),
                     "timestamp": datetime.now().isoformat()
                 })
 
-            # Track Playwright browser verifications
-            # 1. Direct MCP Playwright server usage (non-Docker)
-            elif tool_name.startswith("mcp__playwright__"):
-                self.browser_verifications += 1
-
-            # 2. Docker sandbox Playwright usage via bash_docker
-            elif tool_name == "mcp__task-manager__bash_docker":
-                # Check if this is a Playwright/browser verification command
-                command = tool_input.get("command", "").lower()
-
-                # Check for various browser testing patterns
-                browser_patterns = [
-                    'playwright',
-                    'npm test',
-                    'npm run test',
-                    'npx test',
-                    'node verify',
-                    'node.*test.*browser',
-                    'screenshot',
-                    '.test.',
-                    '.spec.',
-                    'e2e',
-                    'integration'
-                ]
-
-                for pattern in browser_patterns:
-                    if pattern in command:
-                        self.browser_verifications += 1
-                        break
+            # All metrics are now tracked in MetricsCollector
 
     def log_thinking(self, thinking: str):
         """Log extended thinking blocks."""
@@ -374,7 +388,21 @@ class SessionLogger:
         """
         duration = time.time() - self.start_time
 
-        # Session end event
+        # Get comprehensive metrics from collector
+        comprehensive_metrics = self.metrics.get_summary()
+
+        # Calculate quality score using enhanced formula
+        quality_score = self._calculate_quality_score_v2(comprehensive_metrics)
+
+        # Determine if deep review needed
+        needs_deep_review = self._should_trigger_deep_review(
+            quality_score=quality_score,
+            error_count=comprehensive_metrics.get('tool_errors', 0),
+            session_number=self.session_number,
+            metrics=comprehensive_metrics
+        )
+
+        # Session end event with complete metrics embedded
         session_summary = {
             "event": "session_end",
             "timestamp": datetime.now().isoformat(),
@@ -383,13 +411,12 @@ class SessionLogger:
             "model": self.model,
             "status": status,
             "duration_seconds": duration,
-            "message_count": self.message_count,
-            "tool_use_count": self.tool_use_count,
-            "tool_errors": self.tool_errors,
-            "tasks_completed": self.tasks_completed,
-            "tests_passed": self.tests_passed,
-            "browser_verifications": self.browser_verifications,
-            "response_length": len(response_text)
+            "response_length": len(response_text),
+            # Embed all metrics directly from MetricsCollector
+            **comprehensive_metrics,
+            # Add calculated fields
+            "quality_score": quality_score,
+            "needs_deep_review": needs_deep_review,
         }
 
         # Add token usage and cost if available
@@ -400,7 +427,7 @@ class SessionLogger:
             session_summary["tokens_cache_read"] = usage_data.get("cache_read_input_tokens", 0)
             if "cost_usd" in usage_data:
                 session_summary["cost_usd"] = usage_data["cost_usd"]
-
+  
         self._write_jsonl(session_summary)
 
         # Human-readable summary
@@ -427,8 +454,122 @@ class SessionLogger:
         self._write_txt("=" * 80 + "\n")
 
         # Note: Session summary is now stored in PostgreSQL database
-        # (sessions table with metrics JSONB field)
+        # by orchestrator.py
         return session_summary
+
+    def _calculate_quality_score_v2(self, metrics: dict) -> int:
+        """
+        Enhanced quality rating that considers both rate AND absolute error counts.
+
+        This fixes the issue where sessions with 48 errors got 9/10 score
+        due to only looking at error rate percentage.
+        """
+        error_count = metrics.get('tool_errors', 0)
+        error_rate = error_count / max(1, metrics.get('tool_use_count', 1))
+        long_running_tools = metrics.get('long_running_tools', 0)
+
+        score = 10
+
+        # ABSOLUTE error penalties (NEW - addresses the 48 errors = 9/10 bug)
+        if error_count >= 50:
+            score -= 5  # Critical: 50+ errors
+        elif error_count >= 30:
+            score -= 4  # High: 30-49 errors
+        elif error_count >= 20:
+            score -= 3  # Moderate: 20-29 errors
+        elif error_count >= 10:
+            score -= 2  # Low: 10-19 errors
+        elif error_count >= 5:
+            score -= 1  # Minor: 5-9 errors
+
+        # RATE penalties (reduced weight compared to before)
+        if error_rate > 0.30:
+            score -= 2  # Extreme rate
+        elif error_rate > 0.20:
+            score -= 1  # High rate
+
+        # Long-running tools penalties
+        if long_running_tools > 15:
+            score -= 3
+        elif long_running_tools > 10:
+            score -= 2
+        elif long_running_tools > 5:
+            score -= 1
+
+        # Browser verification bonus (reward good practices)
+        browser_ops = metrics.get('browser_verifications', 0)
+        if browser_ops >= 10 and error_count < 5:
+            score += 1  # Bonus for good verification with low errors
+
+        return max(1, min(10, score))
+
+    def _should_trigger_deep_review(
+        self,
+        quality_score: int,
+        error_count: int,
+        session_number: int,
+        metrics: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Enhanced deep review trigger logic based on quality metrics.
+
+        Triggers deep review when sessions show signs of quality issues:
+        - Low quality score (< 7)
+        - High error rate (> 10%)
+        - High error count (30+)
+        - Score/error mismatch (20+ errors with high score)
+        - High adherence violations (5+)
+        - Low verification rate (< 50%)
+        - Many repeated errors (3+ of same error)
+
+        Args:
+            quality_score: Calculated quality score (1-10)
+            error_count: Total number of errors in session
+            session_number: Session number (for logging)
+            metrics: Complete metrics dictionary from get_summary()
+
+        Returns:
+            True if deep review should be triggered
+        """
+        # Low quality score (primary trigger)
+        if quality_score < 7:
+            return True
+
+        # High error count regardless of score
+        if error_count >= 30:
+            return True
+
+        # Score/error mismatch (likely issue with quality calculation)
+        if error_count >= 20 and quality_score >= 8:
+            return True
+
+        # If no metrics provided, use basic triggers only
+        if not metrics:
+            return False
+
+        # High error rate (> 10%)
+        error_rate = metrics.get('error_rate', 0)
+        if error_rate > 0.10:
+            return True
+
+        # Adherence violations (5+ violations indicates prompt isn't being followed)
+        adherence_summary = metrics.get('adherence_summary', {})
+        if adherence_summary.get('total_violations', 0) >= 5:
+            return True
+
+        # Low verification rate (< 50% of tasks verified)
+        verification_analysis = metrics.get('verification_analysis', {})
+        verification_rate = verification_analysis.get('verification_rate', 1.0)
+        if verification_rate < 0.5 and metrics.get('test_metrics', {}).get('tasks_completed', 0) >= 3:
+            return True
+
+        # Repeated errors (same error 3+ times suggests systematic problem)
+        error_analysis = metrics.get('error_analysis', {})
+        repeated_errors = error_analysis.get('repeated_errors', {})
+        if any(count >= 3 for count in repeated_errors.values()):
+            return True
+
+        return False
 
 
 class QuietOutputFilter:
@@ -549,4 +690,4 @@ def create_session_logger(
     # We should trust the caller to provide the correct number from the database
     # Legacy auto-detection removed - database is the source of truth
 
-    return SessionLogger(log_dir, session_number, session_type, model, prompt_file, event_callback)
+    return SessionLogger(log_dir, session_number, session_type, model, prompt_file, sandbox_type, event_callback)

@@ -79,14 +79,9 @@ class TestDatabaseMethods:
         assert hasattr(db, 'update_task_status')
         assert hasattr(db, 'list_tasks')
 
-    def test_quality_methods_exist(self):
-        """Test that quality methods exist."""
-        db = TaskDatabase("postgresql://test")
-
-        assert hasattr(db, 'store_quality_check')
-        assert hasattr(db, 'get_session_quality')
-        assert hasattr(db, 'store_deep_review')
-        assert hasattr(db, 'get_project_quality_summary')
+    # Removed: test_quality_methods_exist() - store_quality_check() method removed
+    # Quality metrics now stored in sessions.metrics JSONB field
+    # Remaining quality methods: get_session_quality(), store_deep_review(), get_project_quality_summary()
 
 
 class TestConnectionPool:

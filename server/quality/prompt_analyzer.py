@@ -148,40 +148,38 @@ class PromptImprovementAnalyzer:
             # 4. Generate proposals
             proposals = self._generate_proposals(themes)
 
-            # 5. Generate diffs for each proposal using AI
-            logger.info(f"Generating diffs for {len(proposals)} proposals...")
-            # Store themes for access in _build_improvement_guidance
+            # 5. Consolidate proposals with AI where needed
+            logger.info(f"Consolidating {len(proposals)} proposals...")
+            # Store themes for access in consolidation
             self._current_themes = themes
-            proposals_with_diffs = await self._generate_diffs_for_proposals(
+            proposals_consolidated = await self._consolidate_proposals_with_ai(
                 proposals,
                 sandbox_type
             )
 
-            # 6. Store in database if requested
-            if store_in_db and analysis_id:
-                await self._store_analysis_results(
-                    analysis_id,
-                    sandbox_type,
-                    parsed_reviews,
-                    themes,
-                    proposals_with_diffs
-                )
-                logger.info(f"Stored analysis results in database (ID: {analysis_id})")
+            # 6. Store in database (always store)
+            await self._store_analysis_results(
+                analysis_id,
+                sandbox_type,
+                parsed_reviews,
+                themes,
+                proposals_consolidated
+            )
+            logger.info(f"Stored analysis results in database (ID: {analysis_id})")
 
             return {
                 "status": "completed",
-                "analysis_id": str(analysis_id) if analysis_id else None,
+                "analysis_id": str(analysis_id),
                 "reviews_analyzed": len(parsed_reviews),
                 "themes_identified": len(themes),
-                "proposals_generated": len(proposals),
-                "proposals": proposals,
+                "proposals_generated": len(proposals_consolidated),
+                "proposals": proposals_consolidated,
                 "themes": themes
             }
 
         except Exception as e:
             logger.error(f"Analysis failed: {e}", exc_info=True)
-            if store_in_db and analysis_id:
-                await self._mark_analysis_failed(analysis_id, str(e))
+            await self._mark_analysis_failed(analysis_id, str(e))
             raise
 
     async def _fetch_deep_reviews(self, project_id: UUID) -> List[Dict[str, Any]]:
@@ -542,287 +540,124 @@ class PromptImprovementAnalyzer:
                 analysis_id
             )
 
-    def _read_prompt_file(self, sandbox_type: str) -> str:
-        """Read the current prompt file content."""
-        from pathlib import Path
-
-        prompt_file = f'coding_prompt_{sandbox_type}.md'
-        prompt_path = Path(__file__).parent.parent.parent / 'prompts' / prompt_file
-
-        if not prompt_path.exists():
-            logger.warning(f"Prompt file not found: {prompt_path}")
-            return ""
-
-        return prompt_path.read_text()
-
-    async def _generate_diffs_for_proposals(
+    async def _consolidate_proposals_with_ai(
         self,
         proposals: List[Dict[str, Any]],
         sandbox_type: str
     ) -> List[Dict[str, Any]]:
         """
-        Generate complete improved prompts for each proposal using Claude.
-
-        For each proposal (theme), asks Claude to generate a COMPLETE improved
-        version of the prompt file incorporating all the recommendations.
+        For proposals with multiple recommendations, use AI to consolidate them.
+        For proposals with single recommendations, use them as-is.
         """
-        from server.quality.diff_generator import DiffGenerator
-
-        generator = DiffGenerator()
-        proposals_with_prompts = []
+        consolidated_proposals = []
 
         for proposal in proposals:
-            try:
-                # Build consolidated improvement guidance from recommendations
-                guidance = self._build_improvement_guidance(proposal)
+            theme_data = self._current_themes.get(proposal['theme'], {})
+            recommendations = theme_data.get('recommendations', [])
 
-                # Generate complete improved prompt
-                result = await generator.generate_improved_prompt(
-                    prompt_file=f'coding_prompt_{sandbox_type}.md',
-                    improvement_guidance=guidance,
-                    theme=proposal['theme']
+            # Get unique proposed texts for this theme
+            unique_proposed_texts = []
+            seen_texts = set()
+            for rec in recommendations:
+                text = rec.get('proposed_text', '').strip()
+                if text and text not in seen_texts:
+                    unique_proposed_texts.append(text)
+                    seen_texts.add(text)
+
+            if len(unique_proposed_texts) <= 1:
+                # Single or no proposed text - use as-is
+                consolidated_proposals.append(proposal)
+            else:
+                # Multiple different proposals - consolidate with AI
+                logger.info(f"Consolidating {len(unique_proposed_texts)} proposals for theme '{proposal['theme']}'")
+                consolidated_text = await self._consolidate_with_ai(
+                    theme=proposal['theme'],
+                    problem=proposal.get('problem', ''),
+                    recommendations=recommendations,
+                    unique_proposals=unique_proposed_texts
                 )
 
-                # Extract relevant snippets instead of storing full prompts
-                original_snippet = self._extract_relevant_snippet(
-                    result['original_prompt'],
-                    result.get('changes', []),
-                    is_original=True
-                )
-                proposed_snippet = self._extract_relevant_snippet(
-                    result['improved_prompt'],
-                    result.get('changes', []),
-                    is_original=False
-                )
+                # Update proposal with AI-consolidated text
+                proposal['proposed_text'] = consolidated_text
+                proposal['consolidation_note'] = f"Consolidated {len(unique_proposed_texts)} proposals with AI"
+                consolidated_proposals.append(proposal)
 
-                # Clean up JSON formatting if present in proposed text
-                if proposed_snippet.startswith('```json'):
-                    # Extract content between JSON markers
-                    import json
-                    try:
-                        json_match = re.search(r'```json\s*\n(.*?)\n```', proposed_snippet, re.DOTALL)
-                        if json_match:
-                            json_data = json.loads(json_match.group(1))
-                            # Use the improved_prompt field if it exists
-                            if 'improved_prompt' in json_data:
-                                proposed_snippet = json_data['improved_prompt']
-                            elif 'changes' in json_data and json_data['changes']:
-                                # Build snippet from changes
-                                proposed_snippet = '\n\n'.join([
-                                    f"## {change.get('section', 'Change')}\n{change.get('content', '')}"
-                                    for change in json_data['changes']
-                                ])
-                    except (json.JSONDecodeError, KeyError) as e:
-                        logger.warning(f"Failed to parse JSON from proposed text: {e}")
-                        # Try to extract just the content after the JSON
-                        if '```' in proposed_snippet:
-                            proposed_snippet = proposed_snippet.split('```')[-1].strip()
+        return consolidated_proposals
 
-                proposal['original_text'] = original_snippet
-                proposal['proposed_text'] = proposed_snippet
-                proposal['diff_metadata'] = {
-                    'confidence': result.get('confidence', 0),
-                    'summary': result.get('summary', ''),
-                    'changes': result.get('changes', [])
-                }
-
-                logger.info(f"Generated improved prompt for '{proposal['title']}' (confidence: {result.get('confidence', 0)}, {len(result.get('improved_prompt', ''))} chars)")
-
-            except Exception as e:
-                logger.error(f"Failed to generate improved prompt for '{proposal['title']}': {e}")
-                # Fallback: use empty prompts
-                proposal['original_text'] = ''
-                proposal['proposed_text'] = ''
-                proposal['diff_metadata'] = {
-                    'confidence': 0,
-                    'summary': f'Error: {str(e)}',
-                    'changes': []
-                }
-
-            proposals_with_prompts.append(proposal)
-
-        return proposals_with_prompts
-
-    def _extract_relevant_snippet(self, full_text: str, changes: List[Dict[str, Any]], is_original: bool = True, context_lines: int = 10) -> str:
+    async def _consolidate_with_ai(
+        self,
+        theme: str,
+        problem: str,
+        recommendations: List[Dict[str, Any]],
+        unique_proposals: List[str]
+    ) -> str:
         """
-        Extract only the relevant snippet from the full prompt text based on changes.
-
-        Args:
-            full_text: The complete prompt text
-            changes: List of change dictionaries with section/description info
-            is_original: Whether this is the original (True) or proposed (False) text
-            context_lines: Number of lines to include around changes
-
-        Returns:
-            A snippet containing only the relevant sections
+        Use AI to consolidate multiple proposed texts into one best version.
+        Returns the consolidated proposed_text directly (not JSON).
         """
-        if not changes or not full_text:
-            # If no changes info, try to extract first meaningful section
-            lines = full_text.split('\n')
-            if len(lines) > 50:
-                # Too long, extract key sections
-                snippet_lines = []
-                for i, line in enumerate(lines[:100]):  # Check first 100 lines
-                    if line.startswith('#'):  # Section headers
-                        # Add this section until next header or 20 lines
-                        section_end = min(i + 20, len(lines))
-                        for j in range(i + 1, section_end):
-                            if lines[j].startswith('#'):
-                                section_end = j
-                                break
-                        snippet_lines.extend(lines[i:section_end])
-                        if len(snippet_lines) > 40:  # Enough content
-                            break
-                return '\n'.join(snippet_lines[:50]) if snippet_lines else '\n'.join(lines[:30])
-            return full_text
+        import os
 
-        # Extract sections mentioned in changes
-        snippets = []
-        lines = full_text.split('\n')
+        # Build consolidation prompt with emphasis on brevity
+        prompt = f"""You are consolidating multiple improvement suggestions for the theme: {theme}
 
-        for change in changes[:3]:  # Limit to first 3 changes to avoid huge snippets
-            section = change.get('section', '')
-            description = change.get('description', '')
+Problem being addressed: {problem}
 
-            # Find the section in the text
-            section_found = False
-            for i, line in enumerate(lines):
-                if section and (section.lower() in line.lower() or line.strip().startswith('#')):
-                    # Found a potential match, extract context
-                    start = max(0, i - context_lines//2)
-                    end = min(len(lines), i + context_lines)
-                    snippet = '\n'.join(lines[start:end])
+Here are {len(unique_proposals)} different proposed improvements from various sessions:
 
-                    # Add ellipsis if truncated
-                    if start > 0:
-                        snippet = '...\n' + snippet
-                    if end < len(lines):
-                        snippet = snippet + '\n...'
+"""
+        for i, proposed_text in enumerate(unique_proposals, 1):
+            prompt += f"---\nProposal {i}:\n{proposed_text}\n\n"
 
-                    snippets.append(f"# {section}\n{snippet}")
-                    section_found = True
-                    break
+        prompt += """Please analyze these proposals and create a single, CONCISE consolidated version that:
+1. Combines the best aspects of each proposal
+2. Keeps the result minimal and focused (typically 1-10 lines)
+3. Maintains consistency with the coding agent prompt style
+4. Is ready to be directly inserted into the prompt file
 
-            if not section_found and description:
-                # Try to find by description keywords
-                keywords = [w for w in description.split() if len(w) > 4][:3]
-                for i, line in enumerate(lines):
-                    if any(keyword.lower() in line.lower() for keyword in keywords):
-                        start = max(0, i - context_lines//2)
-                        end = min(len(lines), i + context_lines)
-                        snippet = '\n'.join(lines[start:end])
+IMPORTANT: Keep your consolidated version BRIEF. The entire prompt file is under 250 lines,
+so replacements should be proportionally small. Focus only on the essential changes.
 
-                        if start > 0:
-                            snippet = '...\n' + snippet
-                        if end < len(lines):
-                            snippet = snippet + '\n...'
+Return ONLY the consolidated text that should replace the problematic section in the prompt.
+Do not include JSON formatting, markdown code blocks, or explanations.
+Just return the exact, concise text to use as the replacement."""
 
-                        snippets.append(f"# Related to: {description[:50]}...\n{snippet}")
-                        break
+        # Use Claude to consolidate
+        from server.quality.reviews import create_review_client
 
-        # If no snippets found, return first part of text
-        if not snippets:
-            max_lines = 30
-            lines_to_show = lines[:max_lines]
-            result = '\n'.join(lines_to_show)
-            if len(lines) > max_lines:
-                result += '\n...'
-            return result
+        model = os.getenv('DEFAULT_REVIEW_MODEL', 'claude-3-5-sonnet-20241022')
+        client = create_review_client(model=model)
 
-        return '\n\n---\n\n'.join(snippets)
+        try:
+            async with client:
+                # Send prompt and get response
+                await client.query(prompt)
 
-    def _build_improvement_guidance(self, proposal: Dict[str, Any]) -> str:
-        """
-        Build consolidated improvement guidance for Claude.
+                # Collect response text
+                response_text = ""
+                async for msg in client.receive_response():
+                    msg_type = type(msg).__name__
+                    if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                        for block in msg.content:
+                            block_type = type(block).__name__
+                            if block_type == "TextBlock" and hasattr(block, "text"):
+                                response_text += block.text
 
-        Combines the problem statement, impact, and evidence into
-        clear guidance for improving the prompt.
-        """
-        guidance_parts = []
+            response_text = response_text.strip()
 
-        # Add title and theme
-        guidance_parts.append(f"# {proposal['title']}")
-        guidance_parts.append(f"**Theme**: {proposal['theme']}")
-        guidance_parts.append("")
+            # If we got a good response, return it
+            if response_text:
+                logger.info(f"Successfully consolidated {len(unique_proposals)} proposals into {len(response_text)} chars")
+                return response_text
 
-        # Add problem statement
-        if proposal.get('problem'):
-            guidance_parts.append(f"## Problem")
-            guidance_parts.append(proposal['problem'])
-            guidance_parts.append("")
+            # Fallback to longest proposal
+            logger.warning("AI consolidation returned empty, using longest proposal")
+            return max(unique_proposals, key=len) if unique_proposals else ""
 
-        # Add impact
-        if proposal.get('impact'):
-            guidance_parts.append(f"## Expected Impact")
-            guidance_parts.append(proposal['impact'])
-            guidance_parts.append("")
+        except Exception as e:
+            logger.error(f"Failed to consolidate with AI: {e}")
+            # Return the longest proposal as fallback
+            return max(unique_proposals, key=len) if unique_proposals else ""
 
-        # Add evidence
-        if proposal.get('evidence'):
-            evidence = proposal['evidence']
-            guidance_parts.append(f"## Evidence")
-            guidance_parts.append(f"- Observed in {evidence.get('frequency', 0)} occurrences across {evidence.get('unique_sessions', 0)} sessions")
-            guidance_parts.append(f"- Average session quality: {evidence.get('avg_quality', 0)}/10")
-            guidance_parts.append(f"- Sessions affected: {', '.join(map(str, evidence.get('session_numbers', [])))}")
-            guidance_parts.append("")
-
-        # Add priority
-        if proposal.get('priority'):
-            guidance_parts.append(f"## Priority")
-            guidance_parts.append(proposal['priority'])
-            guidance_parts.append("")
-
-        # CRITICAL: Add the actual recommendations from the theme data
-        # This is where the specific improvement suggestions are stored
-        if hasattr(self, '_current_themes') and proposal.get('theme') in self._current_themes:
-            theme_data = self._current_themes[proposal['theme']]
-            if theme_data.get('recommendations'):
-                guidance_parts.append(f"## Specific Recommendations from Reviews")
-                guidance_parts.append("")
-
-                # Group recommendations by priority
-                high_priority = []
-                medium_priority = []
-                low_priority = []
-
-                for rec in theme_data['recommendations']:
-                    if rec.get('priority') == 'High':
-                        high_priority.append(rec)
-                    elif rec.get('priority') == 'Medium':
-                        medium_priority.append(rec)
-                    else:
-                        low_priority.append(rec)
-
-                # Add high priority recommendations
-                if high_priority:
-                    guidance_parts.append("### High Priority Changes")
-                    for i, rec in enumerate(high_priority[:3], 1):  # Limit to top 3
-                        guidance_parts.append(f"\n**{i}. {rec.get('title', 'Recommendation')}**")
-                        if rec.get('problem'):
-                            guidance_parts.append(f"Problem: {rec['problem']}")
-                        if rec.get('raw_content'):
-                            # Extract the proposed solution from raw_content
-                            content = rec['raw_content']
-                            # Look for proposed solution or recommendation text
-                            if 'Proposed Solution:' in content:
-                                solution_start = content.find('Proposed Solution:')
-                                solution_end = content.find('**Expected Impact:', solution_start)
-                                if solution_end == -1:
-                                    solution_end = len(content)
-                                solution_text = content[solution_start:solution_end].strip()
-                                guidance_parts.append(f"\n{solution_text}")
-                        guidance_parts.append("")
-
-                # Add medium priority if space
-                if medium_priority and len(high_priority) < 3:
-                    guidance_parts.append("### Medium Priority Changes")
-                    for i, rec in enumerate(medium_priority[:2], 1):
-                        guidance_parts.append(f"\n**{i}. {rec.get('title', 'Recommendation')}**")
-                        if rec.get('problem'):
-                            guidance_parts.append(f"Problem: {rec['problem'][:200]}...")
-                    guidance_parts.append("")
-
-        return "\n".join(guidance_parts)
 
     async def _store_analysis_results(
         self,
@@ -857,12 +692,12 @@ class PromptImprovementAnalyzer:
 
             # Store each proposal
             for proposal in proposals:
-                # Use AI-generated diff's original text if available
-                # Otherwise fallback to current_text from review
-                original_text = proposal.get('original_text', proposal.get('current_text', ''))
-
-                # Store diff metadata in the metadata JSONB field
-                diff_metadata = proposal.get('diff_metadata', {})
+                # Extract metadata
+                metadata = {
+                    'consolidation_note': proposal.get('consolidation_note', ''),
+                    'impact': proposal.get('impact', ''),
+                    'priority': proposal.get('priority', 'Medium')
+                }
 
                 await conn.execute(
                     """
@@ -882,15 +717,15 @@ class PromptImprovementAnalyzer:
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'proposed', $10)
                     """,
                     analysis_id,
-                    prompt_file,  # coding_prompt_docker.md or coding_prompt_local.md
+                    prompt_file,
                     proposal['theme'],
-                    original_text,  # AI-identified section from actual prompt file
-                    proposal['proposed_text'],  # AI-generated specific changes
+                    proposal.get('current_text', ''),  # Original problem example from reviews
+                    proposal.get('proposed_text', ''),  # Consolidated solution text
                     'modification',
-                    f"{proposal['title']} - {proposal['problem'][:200]}",
+                    f"{proposal['title']} - {proposal.get('problem', '')[:200]}",
                     json.dumps(proposal['evidence'], default=str),
                     proposal['confidence_level'],
-                    json.dumps(diff_metadata)  # Store diff metadata (all_changes, summary, etc.)
+                    json.dumps(metadata)
                 )
 
 

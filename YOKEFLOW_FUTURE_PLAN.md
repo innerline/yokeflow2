@@ -1,19 +1,219 @@
 # YokeFlow Future Development Roadmap
 
 *Created: January 4, 2026*
-*Updated: January 12, 2026 - Quality & Intervention System Improvements Complete*
+*Updated: February 2, 2026 - Quality System Complete*
 
 ## Executive Summary
 
 YokeFlow v2.0 is **production-ready** with comprehensive test coverage (70%), complete REST API (17 endpoints), automated verification system, and production hardening features. This document outlines future enhancements to expand YokeFlow beyond greenfield web applications.
 
-**Current Status**: v2.0.0 Released (January 9, 2026)
-**Next Release**: v2.1 - Brownfield support and platform expansion
+**Current Release**: v2.0 - Quality system complete (see [QUALITY_SYSTEM_SUMMARY.md](QUALITY_SYSTEM_SUMMARY.md))
+**Next Release**: v2.1 - Platform expansion and UI enhancements
 **Long-term Vision**: Universal AI-powered development platform for all project types
 
 ---
 
-## 🚀 v2.1 Roadmap - Platform Expansion
+## 🎯 Quality & Testing System
+
+**Status**: Core functionality COMPLETE ✅ (Feb 2, 2026)
+
+See [QUALITY_SYSTEM_SUMMARY.md](QUALITY_SYSTEM_SUMMARY.md) for complete implementation details.
+
+**What's Complete**:
+- ✅ Test execution recording with error tracking and performance metrics
+- ✅ Epic test failure tracking with flaky test detection
+- ✅ Epic test blocking (strict/autonomous modes)
+- ✅ Epic re-testing with regression detection
+- ✅ Enhanced review triggers (7 quality-based conditions)
+- ⚠️ Project completion review (implemented but disabled - see Phase 7 below)
+- ✅ Prompt improvement aggregation (60% complete)
+
+**Remaining Work**: Phase 7 enhancement + UI enhancements (see below)
+
+### Phase 7: Project Completion Review Enhancement (8-12h)
+**Goal**: Transform completion review from plan-vs-spec to implementation-vs-spec verification
+
+**Current Status**: ⚠️ Implemented but disabled (February 2026)
+- Backend complete with spec parsing, requirement matching, and Claude reviews
+- Database schema complete (migrations 019-020)
+- REST API endpoints functional
+- Web UI component exists but not integrated
+
+**Problem**: Current implementation compares:
+- ✅ Specification requirements
+- ✅ Planned epics, tasks, and tests
+- ❌ **NOT** actual code, features, or working functionality
+
+This makes it more useful as a **post-initialization check** ("does the plan match the spec?") rather than a **final completion review** ("does the working app meet requirements?").
+
+**Enhancement Plan**:
+
+**Option 1: Post-Initialization Plan Review (4-6h)**
+- Move completion review to run **after Session 0 initialization**
+- Verify epic/task breakdown matches spec before coding starts
+- Allow user to approve or request replanning
+- Integrate with intervention system for approval workflow
+- **Value**: Catch planning mismatches early, save wasted coding effort
+
+**Option 2: True Implementation Verification (12-16h)**
+- Keep as post-completion check, but verify **actual implementation**:
+  - Parse generated code to identify implemented features
+  - Use Playwright screenshots to verify UI requirements
+  - Check API endpoints exist and work (via test results)
+  - Verify database schema matches requirements
+  - Analyze git commits for requirement-to-code tracing
+- **Value**: True validation that working app meets spec
+
+**Option 3: Both (16-20h)**
+- Post-init: Plan verification with approval workflow
+- Post-completion: Implementation verification with evidence
+- **Value**: Catch issues early + validate final delivery
+
+**Recommendation**: Start with Option 1 (post-initialization), then add Option 2 later
+
+**Implementation Tasks**:
+1. Update orchestrator to trigger review after Session 0 (2h)
+2. Add approval workflow UI with intervention system (3-4h)
+3. Enhance requirement matching with semantic similarity (2-3h)
+   - Current keyword matching has low precision
+   - Add Claude-powered semantic matching (costs API calls)
+   - OR lower matching thresholds and accept false positives
+4. Integrate CompletionReviewDashboard into project page (1-2h)
+5. Add "Approve Plan" / "Request Changes" buttons (2h)
+
+**Files**:
+- `server/quality/completion_analyzer.py` - Core analysis logic
+- `server/quality/requirement_matcher.py` - Requirement matching (now includes test data!)
+- `server/quality/spec_parser.py` - Spec parsing
+- `web-ui/src/components/CompletionReviewDashboard.tsx` - UI component (exists but not wired up)
+- `server/agent/orchestrator.py` - Trigger logic (currently commented out)
+
+---
+
+### Quality System UI Enhancements (10-12h)
+**Goal**: Add UI visualizations for quality data already tracked in backend
+
+**Note**: All backend functionality is complete. These are UI-only enhancements.
+
+#### 1. Test Execution UI (2-3h)
+**Display test error tracking data**
+
+**Features**:
+- Display error messages in test result cards
+- Show execution times for performance tracking
+- Highlight tests with high retry counts (flaky tests)
+- Create "Slow Tests" and "Flaky Tests" dashboard views
+
+**Backend Status**: ✅ Complete (Migration 017)
+
+#### 2. Epic Test Failure UI (3-4h)
+**Display failure history and analysis dashboards**
+
+**Features**:
+- Show failure history for each epic test
+- Display error messages and execution times
+- Highlight flaky tests with warnings
+- Poor test quality dashboard
+- Failure patterns visualization
+- Agent retry behavior charts
+
+**Backend Status**: ✅ Complete (Migration 018, 5 analysis views)
+
+#### 3. Notification Integration (2-3h)
+**Send notifications when epic tests fail in strict mode**
+
+**Features**:
+- Use `MultiChannelNotificationService` for strict mode blocks
+- Send webhook/email/SMS if configured
+- Include failure details and intervention_id
+
+**Backend Status**: ✅ Infrastructure ready (`server/utils/notifications.py`)
+
+#### 4. Test Editor (2-3h)
+**Allow editing test requirements after initialization**
+
+**Features**:
+- Edit test requirements (not code)
+- Add/remove success criteria
+- Mark tests as skipped/deprecated
+- Validation and history tracking
+
+**Backend Status**: API endpoints needed
+
+#### 5. Coverage Analysis Display (1-2h)
+**Enhanced coverage visualization**
+
+**Features**:
+- Show coverage percentages per epic
+- Highlight untested tasks
+- Display coverage trends over time
+- Coverage heatmaps
+
+**Backend Status**: Basic stats available
+
+#### 6. Review Scheduling UI (1-2h)
+**Optimize deep review scheduling and resource management**
+
+**Features**:
+- Queue reviews for batch processing
+- Prioritize based on severity
+- Limit concurrent reviews to avoid resource exhaustion
+- Retry failed reviews with exponential backoff
+
+**Backend Status**: ✅ Core trigger logic complete
+**Priority**: Low - Current async execution works well
+
+#### 7. Prompt Version Control & Impact Tracking (4-7h)
+**Track prompt changes and measure quality impact**
+
+**Current Status**: Phase 8 is ~60% complete
+- ✅ Extract recommendations from reviews
+- ✅ Generate consolidated proposals
+- ❌ Version control and impact measurement not implemented
+
+**Features Needed**:
+- Git-based versioning for prompt files (1-2h)
+- A/B testing infrastructure (2-3h)
+- Impact measurement system (1-2h)
+- Automated learning loop (optional, advanced)
+
+**Backend Status**: Database schema ready, code needs implementation
+**Priority**: Low - Manual review works fine
+
+---
+
+## 🔧 Session Recovery & Resilience (Post-Quality Plan)
+
+### Session Checkpoint System (6-8h)
+**Goal**: Enable clean session recovery after failures or interventions
+
+**Features**:
+- Checkpoint creation at key points (task completion, epic completion, interventions)
+- Full conversation history preservation
+- Session state validation before resumption
+- Recovery attempt tracking
+- Context-aware resume prompt generation
+- Link checkpoints to interventions for blocked sessions
+
+**Database**:
+- Tables: `session_checkpoints`, `checkpoint_recoveries` (already exist - migration 012)
+- Infrastructure: `server/agent/checkpoint.py` (complete, 420+ lines, 19 tests)
+
+**Integration Points**:
+- Epic test blocking (quality system integration)
+- General error recovery
+- Manual session pause/resume
+- Orchestrator crash recovery
+
+**Success Criteria**:
+- Sessions can be resumed from checkpoints after interventions
+- Conversation history intact after recovery
+- State validation prevents corrupt resumes
+- Recovery success rate > 95%
+
+---
+
+## 🚀 v2.2 Roadmap - Platform Expansion
 
 Focus: Expand YokeFlow beyond greenfield web applications.
 
@@ -368,6 +568,17 @@ These features are valuable but not critical for v2.1:
 - Retry frequency
 - Intervention frequency
 
+**UI Enhancement - Session Timeline Expanded Metrics**:
+Consider adding additional detailed metrics to the expandable metrics view in SessionTimeline (`web-ui/src/components/SessionTimeline.tsx` line 207):
+- Tool usage breakdown (by tool type: Read, Write, Edit, Grep, Bash, etc.)
+- Performance statistics (avg tool execution time, cache hit rates)
+- Efficiency scores (tools per task, retries per tool)
+- Context usage metrics (tokens per message, context window utilization)
+- Git activity (commits, files changed, lines added/removed)
+- Browser verification details (screenshots count, page interactions)
+
+**Note**: Quality score is now displayed inline after Duration in the session history view (removed from separate Session Quality tab)
+
 ### 3. Quality Trends (4-6h)
 **Metrics**:
 - Code quality over time
@@ -390,59 +601,6 @@ These features are valuable but not critical for v2.1:
 **Issue**: Long-running sessions can exhaust connection pool
 **Mitigation**: Implemented retry logic with exponential backoff
 **Improvement**: Dynamic pool sizing based on active sessions
-
-### 3. Selective Browser Testing
-**Issue**: All tasks use browser testing, even non-UI tasks
-**Impact**: Slower verification, unnecessary resource usage
-**Solution**: Implement task type detection and selective verification
-
----
-
-## 📅 Implementation Roadmap
-
-### v2.1 Release (Q1 2026)
-**Focus**: Platform expansion
-**Timeline**: 8-12 weeks
-**Effort**: 45-58 hours
-
-**Priorities**:
-1. Brownfield UI support (20-25h)
-2. Non-UI project support (15-18h)
-3. AI & agent improvements (10-15h)
-
-**Success Criteria**:
-- ✅ Import and modify existing GitHub projects
-- ✅ Generate APIs, libraries, CLI tools without UI
-- ✅ Improved code quality and error recovery
-- ✅ 80%+ test coverage maintained
-
-### v2.2 Release (Q2 2026)
-**Focus**: Enterprise features
-**Timeline**: 10-14 weeks
-**Effort**: 50-60 hours
-
-**Priorities**:
-1. Multi-user support & authentication (15-18h)
-2. Advanced spec features (8-10h)
-3. Performance monitoring (8-10h)
-4. E2B integration (10-12h)
-5. Resource management (10-12h)
-
-**Success Criteria**:
-- ✅ Support for teams and collaboration
-- ✅ Template system for rapid project creation
-- ✅ E2B sandbox integration
-- ✅ Comprehensive monitoring and analytics
-
-### v3.0 and Beyond (H2 2026+)
-**Focus**: AI advancement & integrations
-**Features**:
-- Agent specialization
-- Advanced code review
-- Deployment automation
-- Real-time collaboration
-- Task manager integrations
-- Template marketplace
 
 ---
 
@@ -487,11 +645,7 @@ These features are valuable but not critical for v2.1:
 
 ## 📚 Additional Resources
 
-- **TODO-FUTURE.md** - Detailed feature ideas and enhancements
 - **CONTRIBUTING.md** - How to contribute to YokeFlow development
 - **CHANGELOG.md** - Version history and release notes
 - **docs/** - Comprehensive documentation for all features
 
----
-
-*Last Updated: January 9, 2026 - v2.0.0 Released*

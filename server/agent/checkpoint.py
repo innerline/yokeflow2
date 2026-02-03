@@ -6,7 +6,7 @@ Manages session checkpoints for failure recovery and resumption.
 Enables sessions to be resumed from the last successful state after crashes or errors.
 
 Key Features:
-- Automatic checkpointing after task completion
+- Automatic checkpointing after epic completion
 - Full conversation history preservation
 - State validation before resumption
 - Recovery attempt tracking
@@ -29,7 +29,6 @@ class CheckpointManager:
     Manages session checkpoints for recovery and resumption.
 
     Checkpoints are created at key points during session execution:
-    - After each task completion (automatic)
     - After epic completion (automatic)
     - On manual request (manual)
     - Before error handling (error)

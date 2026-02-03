@@ -53,6 +53,8 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
                 'total_epics': int,
                 'total_tasks': int,
                 'total_tests': int,
+                'total_task_tests': int,  # Tests for tasks
+                'total_epic_tests': int,  # Epic integration tests
                 'tasks_with_tests': int,
                 'tasks_without_tests': int,
                 'avg_tests_per_task': float,
@@ -102,18 +104,31 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
         )
         tasks = [dict(row) for row in task_rows]
 
-        # Get all tests
+        # Get all task tests
         test_rows = await conn.fetch(
-            "SELECT * FROM tests WHERE project_id = $1 ORDER BY task_id",
+            "SELECT * FROM task_tests WHERE project_id = $1 ORDER BY task_id",
             project_id
         )
         tests = [dict(row) for row in test_rows]
+
+        # Get all epic tests
+        epic_test_rows = await conn.fetch(
+            "SELECT * FROM epic_tests WHERE epic_id IN (SELECT id FROM epics WHERE project_id = $1) ORDER BY epic_id",
+            project_id
+        )
+        epic_tests = [dict(row) for row in epic_test_rows]
 
         # Build map of task_id -> test count
         task_test_counts = {}
         for test in tests:
             task_id = test['task_id']
             task_test_counts[task_id] = task_test_counts.get(task_id, 0) + 1
+
+        # Build map of epic_id -> epic test count
+        epic_test_counts = {}
+        for epic_test in epic_tests:
+            epic_id = epic_test['epic_id']
+            epic_test_counts[epic_id] = epic_test_counts.get(epic_id, 0) + 1
 
         # Analyze by epic
         epic_stats = defaultdict(lambda: {
@@ -122,7 +137,9 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
             'total_tasks': 0,
             'tasks_with_tests': 0,
             'tasks_without_tests': 0,
-            'total_tests': 0,
+            'total_task_tests': 0,
+            'total_epic_tests': 0,
+            'total_tests': 0,  # Combined task + epic tests
             'coverage_percentage': 0.0,
             'tasks_0_tests': [],
             'tasks_1_test': [],
@@ -137,7 +154,7 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
             stats['epic_id'] = epic_id
             stats['epic_name'] = epics[epic_id]['name']
             stats['total_tasks'] += 1
-            stats['total_tests'] += test_count
+            stats['total_task_tests'] += test_count
 
             if test_count > 0:
                 stats['tasks_with_tests'] += 1
@@ -151,6 +168,11 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
                 stats['tasks_1_test'].append(task)
             else:
                 stats['tasks_2plus_tests'].append(task)
+
+        # Add epic test counts
+        for epic_id, stats in epic_stats.items():
+            stats['total_epic_tests'] = epic_test_counts.get(epic_id, 0)
+            stats['total_tests'] = stats['total_task_tests'] + stats['total_epic_tests']
 
         # Calculate coverage percentages
         for stats in epic_stats.values():
@@ -166,7 +188,9 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
         overall = {
             'total_epics': len(epics),
             'total_tasks': len(tasks),
-            'total_tests': len(tests),
+            'total_tests': len(tests) + len(epic_tests),  # Combined total
+            'total_task_tests': len(tests),
+            'total_epic_tests': len(epic_tests),
             'tasks_with_tests': tasks_with_tests,
             'tasks_without_tests': tasks_without_tests,
             'avg_tests_per_task': round(avg_tests_per_task, 2),

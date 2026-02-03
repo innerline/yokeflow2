@@ -185,7 +185,8 @@ class ProjectResetter:
         Reset database to post-initialization state.
 
         - Resets all task completion status
-        - Resets all test results
+        - Resets all task test results and verification notes
+        - Resets all epic test results and verification notes
         - Resets epic status
         - Deletes all session records except Session 0 (initialization)
 
@@ -208,14 +209,32 @@ class ProjectResetter:
                         self.project_id,
                     )
 
-                    # Reset tests
+                    # Reset task tests
                     await conn.execute(
                         """
-                        UPDATE tests
+                        UPDATE task_tests
                         SET passes = FALSE,
                             verified_at = NULL,
                             session_id = NULL,
-                            result = '{}'
+                            result = '{}',
+                            verification_notes = NULL
+                        WHERE project_id = $1
+                        """,
+                        self.project_id,
+                    )
+
+                    # Reset epic tests
+                    await conn.execute(
+                        """
+                        UPDATE epic_tests
+                        SET last_execution = NULL,
+                            last_result = NULL,
+                            execution_log = NULL,
+                            verification_notes = NULL,
+                            execution_count = 0,
+                            pass_count = 0,
+                            fail_count = 0,
+                            skip_count = 0
                         WHERE project_id = $1
                         """,
                         self.project_id,
@@ -243,7 +262,66 @@ class ProjectResetter:
                         self.project_id,
                     )
 
-                    # Delete coding session records (keep Session 0 - initialization)
+                    # Delete intervention records first (foreign key to sessions)
+                    await conn.execute(
+                        """
+                        DELETE FROM epic_test_interventions
+                        WHERE epic_id IN (
+                            SELECT id FROM epics WHERE project_id = $1
+                        )
+                        """,
+                        self.project_id,
+                    )
+
+                    # Delete other session-related tables (Phase 2 - epic test failures)
+                    # Note: epic_test_failures uses epic_id, not project_id
+                    await conn.execute(
+                        """
+                        DELETE FROM epic_test_failures
+                        WHERE epic_id IN (
+                            SELECT id FROM epics WHERE project_id = $1
+                        )
+                        """,
+                        self.project_id,
+                    )
+
+                    # Delete paused session records (Production Hardening - Intervention System)
+                    await conn.execute(
+                        """
+                        DELETE FROM intervention_actions
+                        WHERE paused_session_id IN (
+                            SELECT id FROM paused_sessions WHERE project_id = $1
+                        )
+                        """,
+                        self.project_id,
+                    )
+
+                    await conn.execute(
+                        """
+                        DELETE FROM paused_sessions
+                        WHERE project_id = $1
+                        """,
+                        self.project_id,
+                    )
+
+                    # Delete session checkpoint records (if table exists - removed in cleanup migration)
+                    # Note: checkpoint_recoveries was removed in cleanup migration
+                    # Note: session_checkpoints was removed in cleanup migration
+
+                    # Delete quality review records
+                    # Note: session_quality_checks was removed in drop_session_quality_checks.sql migration
+                    # Note: session_deep_reviews uses session_id, not project_id
+                    await conn.execute(
+                        """
+                        DELETE FROM session_deep_reviews
+                        WHERE session_id IN (
+                            SELECT id FROM sessions WHERE project_id = $1 AND session_number > 0
+                        )
+                        """,
+                        self.project_id,
+                    )
+
+                    # NOW delete coding session records (keep Session 0 - initialization)
                     await conn.execute(
                         """
                         DELETE FROM sessions

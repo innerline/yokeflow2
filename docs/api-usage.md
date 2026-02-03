@@ -2,7 +2,37 @@
 
 YokeFlow provides a RESTful API for managing projects and sessions programmatically. The Web UI uses this API, and you can use it directly for automation or integration.
 
-**Version**: 2.0.0
+**Version**: 2.1.0
+
+---
+
+## What's New in v2.1
+
+YokeFlow 2.1 adds comprehensive quality system endpoints and project completion verification:
+
+- **Project Completion Reviews** - AI-powered verification against original specs (5 endpoints)
+- **Intervention Management** - Handle session blockers gracefully (5 endpoints)
+- **Container Management** - Direct Docker container control (4 endpoints)
+- **Enhanced Quality Monitoring** - Deep reviews and statistics (4 endpoints)
+- **Screenshot Access** - Visual verification artifacts (2 endpoints)
+- **Administration Tools** - Cleanup and validation utilities (3 endpoints)
+
+**Total API Growth**: 17 endpoints (v2.0) → 60+ endpoints (v2.1)
+
+See [QUALITY_SYSTEM_SUMMARY.md](../QUALITY_SYSTEM_SUMMARY.md) for complete implementation details.
+
+### Quick Reference: Most Used v2.1 Endpoints
+
+| Task | Endpoint | Method |
+|------|----------|--------|
+| Trigger completion review | `/api/projects/{id}/completion-review` | `POST` |
+| Check active interventions | `/api/interventions/active` | `GET` |
+| Resume from blocker | `/api/interventions/{id}/resume` | `POST` |
+| View deep reviews | `/api/projects/{id}/deep-reviews` | `GET` |
+| Get review statistics | `/api/projects/{id}/review-stats` | `GET` |
+| List screenshots | `/api/projects/{id}/screenshots` | `GET` |
+| Check container status | `/api/projects/{id}/container/status` | `GET` |
+| Clean orphaned sessions | `/api/admin/cleanup-orphaned-sessions` | `POST` |
 
 ---
 
@@ -114,12 +144,16 @@ ws.onmessage = (event) => {
 
 ## API Endpoints Reference
 
+YokeFlow provides **60+ RESTful endpoints** for complete platform control.
+
 ### Health & Status
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Basic health check |
-| `GET` | `/health/detailed` | Detailed component status ⭐ NEW v2.0 |
+| `GET` | `/health/detailed` | Detailed component status |
+| `GET` | `/api/health` | API health check |
+| `GET` | `/api/info` | API version and info |
 
 ### Projects
 
@@ -128,36 +162,105 @@ ws.onmessage = (event) => {
 | `GET` | `/api/projects` | List all projects |
 | `POST` | `/api/projects` | Create new project |
 | `GET` | `/api/projects/{id}` | Get project details |
-| `GET` | `/api/projects/{id}/progress` | Get progress stats |
+| `PATCH` | `/api/projects/{id}` | Update project (rename) |
 | `DELETE` | `/api/projects/{id}` | Delete project |
+| `GET` | `/api/projects/{id}/progress` | Get progress stats |
+| `POST` | `/api/projects/{id}/reset` | Reset project to post-init state |
+| `GET` | `/api/projects/{id}/settings` | Get project settings |
+| `PUT` | `/api/projects/{id}/settings` | Update project settings |
+| `GET` | `/api/projects/{id}/env` | Get environment variables |
+| `POST` | `/api/projects/{id}/env` | Set environment variables |
+| `GET` | `/api/projects/{id}/coverage` | Get test coverage data |
+| `GET` | `/api/projects/{id}/epics` | List all epics |
+| `GET` | `/api/projects/{id}/tasks` | List all tasks |
+| `GET` | `/api/projects/{id}/tasks/{task_id}` | Get specific task |
+| `GET` | `/api/projects/{id}/epics/{epic_id}` | Get specific epic |
+| `GET` | `/api/projects/{id}/logs` | List available log files |
+| `GET` | `/api/projects/{id}/logs/human/{filename}` | Get human-readable log |
+| `GET` | `/api/projects/{id}/logs/events/{filename}` | Get event log (JSONL) |
+| `GET` | `/api/projects/{id}/screenshots` | List screenshots ⭐ NEW v2.1 |
+| `GET` | `/api/projects/{id}/screenshots/{filename}` | Get screenshot ⭐ NEW v2.1 |
 
 ### Sessions
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/projects/{id}/initialize` | Start initialization |
+| `POST` | `/api/projects/{id}/initialize` | Start initialization (Session 0) |
+| `POST` | `/api/projects/{id}/initialize/cancel` | Cancel initialization |
 | `POST` | `/api/projects/{id}/coding/start` | Start coding session |
+| `POST` | `/api/projects/{id}/sessions/start` | Start generic session |
 | `POST` | `/api/projects/{id}/coding/stop` | Stop current session |
+| `POST` | `/api/projects/{id}/stop-after-current` | Queue stop after current session |
+| `DELETE` | `/api/projects/{id}/stop-after-current` | Cancel queued stop |
 | `GET` | `/api/projects/{id}/sessions` | List all sessions |
 | `GET` | `/api/projects/{id}/sessions/{sid}` | Get session details |
-| `GET` | `/api/sessions/{sid}/logs` | Get session logs ⭐ NEW v2.0 |
-| `POST` | `/api/sessions/{sid}/pause` | Pause active session ⭐ NEW v2.0 |
-| `POST` | `/api/sessions/{sid}/resume` | Resume paused session ⭐ NEW v2.0 |
+| `POST` | `/api/projects/{id}/sessions/{sid}/stop` | Stop specific session |
+| `GET` | `/api/sessions/{sid}/logs` | Get session logs with pagination |
+| `POST` | `/api/sessions/{sid}/pause` | Pause active session |
+| `POST` | `/api/sessions/{sid}/resume` | Resume paused session |
 
 ### Tasks & Epics
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/tasks/{task_id}` | Get task details ⭐ NEW v2.0 |
-| `PATCH` | `/api/tasks/{task_id}` | Update task status ⭐ NEW v2.0 |
-| `GET` | `/api/epics/{epic_id}/progress` | Get epic progress ⭐ NEW v2.0 |
+| `GET` | `/api/tasks/{task_id}` | Get task details |
+| `PATCH` | `/api/tasks/{task_id}` | Update task status |
+| `GET` | `/api/epics/{epic_id}/progress` | Get epic progress with task breakdown |
 
 ### Quality & Verification
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/sessions/{sid}/quality-review` | Trigger quality review ⭐ NEW v2.0 |
-| `GET` | `/api/projects/{id}/quality-metrics` | Get quality metrics ⭐ NEW v2.0 |
+| `POST` | `/api/sessions/{sid}/quality-review` | Trigger quality review for session |
+| `GET` | `/api/projects/{id}/quality-metrics` | Get quality metrics summary |
+| `GET` | `/api/projects/{id}/deep-reviews` | List all deep reviews ⭐ NEW v2.1 |
+| `GET` | `/api/projects/{id}/review-stats` | Get review statistics ⭐ NEW v2.1 |
+| `POST` | `/api/projects/{id}/sessions/{sid}/review` | Trigger session review ⭐ NEW v2.1 |
+| `POST` | `/api/projects/{id}/trigger-reviews` | Batch trigger reviews ⭐ NEW v2.1 |
+
+### Project Completion Reviews ⭐ NEW v2.1
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/projects/{id}/completion-review` | Get latest completion review |
+| `POST` | `/api/projects/{id}/completion-review` | Trigger completion review |
+| `GET` | `/api/completion-reviews` | List all reviews (with filters) |
+| `GET` | `/api/completion-reviews/{id}/requirements` | Get requirement breakdown |
+| `GET` | `/api/completion-reviews/{id}/section-summary` | Get section-level summary |
+
+### Intervention Management ⭐ NEW v2.1
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/interventions/active` | List active interventions |
+| `POST` | `/api/interventions/{id}/resume` | Resume from intervention |
+| `GET` | `/api/interventions/history` | View intervention history |
+| `GET` | `/api/projects/{id}/notifications/preferences` | Get notification settings |
+| `POST` | `/api/projects/{id}/notifications/preferences` | Update notification settings |
+
+### Container Management ⭐ NEW v2.1
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/projects/{id}/container/status` | Check Docker container status |
+| `POST` | `/api/projects/{id}/container/start` | Start Docker container |
+| `POST` | `/api/projects/{id}/container/stop` | Stop Docker container |
+| `DELETE` | `/api/projects/{id}/container` | Remove Docker container |
+
+### Administration ⭐ NEW v2.1
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/admin/cleanup-orphaned-sessions` | Clean up orphaned sessions |
+| `POST` | `/api/generate-spec` | Generate spec with AI (see [ai-spec-generation.md](ai-spec-generation.md)) |
+| `POST` | `/api/validate-spec` | Validate specification file |
+
+### Authentication
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/auth/login` | Login and get JWT token |
+| `GET` | `/api/auth/verify` | Verify token validity |
 
 ### Real-Time
 
@@ -165,9 +268,11 @@ ws.onmessage = (event) => {
 |--------|----------|-------------|
 | `WS` | `/api/ws/{id}` | WebSocket for live updates |
 
-⭐ **v2.0 New Endpoints** - See sections below for usage examples
+---
 
-**See interactive documentation at http://localhost:8000/docs for complete endpoint details**
+**Total: 60+ endpoints** | ⭐ **v2.1 additions** marked above | See detailed examples below
+
+**Interactive Documentation**: http://localhost:8000/docs (Swagger UI with try-it-out functionality)
 
 ---
 
@@ -349,6 +454,77 @@ asyncio.run(monitor_project("550e8400-..."))
 
 ---
 
+## Example: Project Completion Review (v2.1)
+
+```python
+import requests
+import time
+
+API_URL = "http://localhost:8000"
+PROJECT_ID = "550e8400-..."
+
+# 1. Check if project is complete
+response = requests.get(f"{API_URL}/api/projects/{PROJECT_ID}/progress")
+progress = response.json()
+
+if progress['task_completion_pct'] >= 100:
+    print("Project complete! Triggering completion review...")
+
+    # 2. Trigger completion review
+    response = requests.post(
+        f"{API_URL}/api/projects/{PROJECT_ID}/completion-review"
+    )
+    review = response.json()
+    review_id = review['id']
+
+    # 3. Wait for review to complete (reviews are async)
+    while True:
+        response = requests.get(
+            f"{API_URL}/api/projects/{PROJECT_ID}/completion-review"
+        )
+        review = response.json()
+
+        if review.get('status') == 'completed':
+            break
+
+        time.sleep(5)
+
+    # 4. Display results
+    print(f"\n=== Completion Review Results ===")
+    print(f"Overall Score: {review['overall_score']}/100")
+    print(f"Coverage: {review['coverage_percentage']:.1f}%")
+    print(f"Recommendation: {review['recommendation']}")
+    print(f"\nExecutive Summary:")
+    print(review['executive_summary'])
+
+    # 5. Get detailed requirement breakdown
+    response = requests.get(
+        f"{API_URL}/api/completion-reviews/{review_id}/requirements"
+    )
+    requirements = response.json()
+
+    print(f"\n=== Requirement Breakdown ===")
+    for req in requirements['requirements']:
+        status_icon = "✅" if req['status'] == 'implemented' else "❌"
+        print(f"{status_icon} [{req['priority']}] {req['requirement_text']}")
+        print(f"   Coverage: {req['coverage_score']:.1f}%")
+        print(f"   Matched: {len(req['matched_epics'])} epics, {len(req['matched_tasks'])} tasks\n")
+
+    # 6. Get section summary
+    response = requests.get(
+        f"{API_URL}/api/completion-reviews/{review_id}/section-summary"
+    )
+    sections = response.json()
+
+    print(f"\n=== Section Coverage ===")
+    for section in sections['sections']:
+        print(f"{section['section_name']}: {section['coverage_percentage']:.1f}% ({section['requirements_met']}/{section['total_requirements']})")
+else:
+    print(f"Project not complete yet: {progress['task_completion_pct']:.1f}%")
+```
+
+---
+
 ## CORS Configuration
 
 The API supports CORS for web applications:
@@ -441,7 +617,258 @@ curl http://localhost:8000/api/projects/PROJECT_ID
 
 ---
 
-## v2.0 New Endpoints
+## v2.1 New Features & Endpoints
+
+### Project Completion Reviews
+
+Automatically verify projects meet original specifications with AI-powered analysis.
+
+#### Get Latest Completion Review
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/completion-review
+```
+
+**Response:**
+```json
+{
+  "id": "review-123",
+  "project_id": "PROJECT_ID",
+  "overall_score": 87,
+  "coverage_percentage": 92.5,
+  "recommendation": "COMPLETE",
+  "executive_summary": "Project successfully implements all core features...",
+  "created_at": "2026-02-02T10:30:00Z"
+}
+```
+
+#### Trigger Completion Review
+
+```bash
+curl -X POST http://localhost:8000/api/projects/PROJECT_ID/completion-review
+```
+
+#### Get Requirement Breakdown
+
+```bash
+curl http://localhost:8000/api/completion-reviews/review-123/requirements
+```
+
+**Response:**
+```json
+{
+  "requirements": [
+    {
+      "id": 1,
+      "section": "User Management",
+      "requirement_text": "User registration with email verification",
+      "priority": "high",
+      "status": "implemented",
+      "matched_epics": [5, 6],
+      "matched_tasks": [42, 43, 44],
+      "coverage_score": 95.0
+    }
+  ]
+}
+```
+
+**Scoring Algorithm:**
+- Coverage: 60% (requirements matched to epics/tasks)
+- Quality: 20% (test pass rate, code quality)
+- Bonus/Penalty: 20% (extra features, missing critical items)
+
+**Recommendations:**
+- `COMPLETE`: ≥90% coverage, score ≥85, no missing high-priority
+- `NEEDS_WORK`: ≥70% coverage, score ≥70
+- `FAILED`: <70% coverage or score <70
+
+### Intervention Management
+
+Handle session blockers and interruptions gracefully.
+
+#### List Active Interventions
+
+```bash
+curl http://localhost:8000/api/interventions/active
+```
+
+**Response:**
+```json
+[
+  {
+    "intervention_id": "int-456",
+    "project_id": "PROJECT_ID",
+    "session_id": "session-789",
+    "blocker_type": "epic_test_failure",
+    "blocker_info": {
+      "epic_id": 5,
+      "epic_name": "User Authentication",
+      "failed_tests": 3,
+      "critical": true
+    },
+    "paused_at": "2026-02-02T10:00:00Z",
+    "status": "active"
+  }
+]
+```
+
+#### Resume from Intervention
+
+```bash
+curl -X POST http://localhost:8000/api/interventions/int-456/resume \
+  -H "Content-Type: application/json" \
+  -d '{"resolution_notes": "Fixed authentication tests"}'
+```
+
+#### Notification Preferences
+
+```bash
+# Get preferences
+curl http://localhost:8000/api/projects/PROJECT_ID/notifications/preferences
+
+# Update preferences
+curl -X POST http://localhost:8000/api/projects/PROJECT_ID/notifications/preferences \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email_enabled": true,
+    "webhook_url": "https://hooks.slack.com/...",
+    "on_session_blocked": true,
+    "on_project_complete": true
+  }'
+```
+
+### Container Management
+
+Direct control over Docker containers for debugging and management.
+
+#### Check Container Status
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/container/status
+```
+
+**Response:**
+```json
+{
+  "container_id": "abc123...",
+  "status": "running",
+  "uptime_seconds": 3600,
+  "cpu_usage": "2.5%",
+  "memory_usage": "512MB"
+}
+```
+
+#### Start/Stop Container
+
+```bash
+# Start container
+curl -X POST http://localhost:8000/api/projects/PROJECT_ID/container/start
+
+# Stop container
+curl -X POST http://localhost:8000/api/projects/PROJECT_ID/container/stop
+
+# Remove container
+curl -X DELETE http://localhost:8000/api/projects/PROJECT_ID/container
+```
+
+### Deep Reviews & Statistics
+
+Enhanced quality monitoring with detailed analytics.
+
+#### List Deep Reviews
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/deep-reviews?limit=10
+```
+
+**Response:**
+```json
+{
+  "reviews": [
+    {
+      "id": "review-789",
+      "session_id": "session-123",
+      "quality_score": 8.5,
+      "issues_found": 5,
+      "recommendations": [
+        {
+          "theme": "error_handling",
+          "suggestion": "Add try-catch blocks for API calls",
+          "confidence": 0.85
+        }
+      ],
+      "created_at": "2026-02-02T09:00:00Z"
+    }
+  ]
+}
+```
+
+#### Get Review Statistics
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/review-stats
+```
+
+**Response:**
+```json
+{
+  "total_reviews": 25,
+  "average_quality_score": 8.2,
+  "total_issues_found": 120,
+  "total_issues_resolved": 95,
+  "resolution_rate": 79.2,
+  "quality_trend": "improving"
+}
+```
+
+#### Batch Trigger Reviews
+
+```bash
+curl -X POST http://localhost:8000/api/projects/PROJECT_ID/trigger-reviews \
+  -H "Content-Type: application/json" \
+  -d '{
+    "review_type": "comprehensive",
+    "session_ids": ["session-1", "session-2", "session-3"]
+  }'
+```
+
+### Screenshots
+
+Access visual verification artifacts from browser testing.
+
+#### List Screenshots
+
+```bash
+curl http://localhost:8000/api/projects/PROJECT_ID/screenshots
+```
+
+**Response:**
+```json
+{
+  "screenshots": [
+    {
+      "filename": "login-page-2026-02-02-10-30-45.png",
+      "task_id": 42,
+      "session_id": "session-123",
+      "timestamp": "2026-02-02T10:30:45Z",
+      "size_bytes": 125678,
+      "url": "/api/projects/PROJECT_ID/screenshots/login-page-2026-02-02-10-30-45.png"
+    }
+  ]
+}
+```
+
+#### Get Screenshot
+
+```bash
+# Download screenshot
+curl http://localhost:8000/api/projects/PROJECT_ID/screenshots/login-page.png \
+  --output login-page.png
+```
+
+---
+
+## v2.0 Endpoints (Legacy Documentation)
 
 ### Session Management
 
@@ -609,10 +1036,22 @@ curl http://localhost:8000/health/detailed
 
 ## Related Documentation
 
+### Core Documentation
 - **[authentication.md](authentication.md)** - Authentication system details
 - **[deployment-guide.md](deployment-guide.md)** - Production deployment
 - **[developer-guide.md](developer-guide.md)** - Platform architecture
+- **[configuration.md](configuration.md)** - Configuration reference
+
+### Quality & Testing
+- **[quality-system.md](quality-system.md)** - Complete quality system (Phases 0-8) ⭐ NEW v2.1
 - **[verification-system.md](verification-system.md)** - Automatic verification system
+- **[testing-guide.md](testing-guide.md)** - Testing practices
+
+### Reference
+- **[mcp-usage.md](mcp-usage.md)** - MCP tools documentation
+- **[input-validation.md](input-validation.md)** - Validation framework
+- **[ai-spec-generation.md](ai-spec-generation.md)** - AI specification generation ⭐ NEW v2.1
+- **[QUALITY_SYSTEM_SUMMARY.md](../QUALITY_SYSTEM_SUMMARY.md)** - Phase-by-phase implementation summary ⭐ NEW v2.1
 
 ---
 

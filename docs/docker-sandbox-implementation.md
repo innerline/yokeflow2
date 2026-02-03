@@ -14,6 +14,7 @@ YokeFlow uses Docker containers to isolate agent execution and prevent environme
 - ✅ Auto-delete on project deletion (December 2025)
 - ✅ Web UI container management (/containers page)
 - ✅ Playwright browser automation within Docker (December 2025)
+- ✅ **agent-browser integration for AI-optimized testing (January 2026)**
 
 **Container Lifecycle:**
 ```
@@ -23,6 +24,49 @@ Coding → Reuses container → Kept running
 Project Complete → ✅ Container auto-stopped (frees ports)
 Project Deleted → ✅ Container auto-deleted (cleanup)
 ```
+
+---
+
+## Building the Docker Image
+
+### Prerequisites
+- Docker Desktop installed and running
+- At least 4GB of available disk space
+
+### Build Script
+Use the provided build script to create the YokeFlow Docker image:
+
+```bash
+./scripts/build-docker-image.sh
+```
+
+This builds an image named `yokeflow-playwright:latest` that includes:
+- **Node.js 20 LTS** - For running the application
+- **Playwright browsers** - Chromium, Firefox, and WebKit
+- **agent-browser** - AI-optimized browser automation CLI
+- **Development tools** - git, curl, build-essential, Python, etc.
+
+### Manual Build
+If you prefer to build manually:
+
+```bash
+docker build -f docker/Dockerfile.agent-sandbox-playwright -t yokeflow-playwright:latest docker/
+```
+
+### Browser Automation Options
+
+The Docker image supports two browser automation approaches:
+
+1. **agent-browser (Default for Docker)** - AI-optimized CLI tool
+   - Simpler command interface
+   - Accessibility tree with stable element refs
+   - Persistent daemon for faster testing
+   - Used via: `agent-browser open`, `agent-browser click`, etc.
+
+2. **Playwright (Fallback)** - Traditional browser automation
+   - Full programmatic control
+   - Complex interaction scenarios
+   - Still available if needed
 
 ---
 
@@ -529,6 +573,129 @@ async def get_stats(self) -> Dict[str, Any]:
 ```
 
 **Effort:** 4-6 hours
+
+---
+
+## agent-browser Usage Examples
+
+### Basic UI Testing Flow
+
+Here's how the agent uses agent-browser for browser testing in Docker:
+
+```bash
+# 1. Start the daemon (once per session)
+mcp__task-manager__bash_docker({
+  command: "pgrep -f 'agent-browser daemon' || (agent-browser daemon > /tmp/browser-daemon.log 2>&1 &)"
+})
+
+# 2. Navigate to the application
+mcp__task-manager__bash_docker({ command: "agent-browser open http://localhost:3000" })
+
+# 3. Get accessibility snapshot with element refs
+mcp__task-manager__bash_docker({ command: "agent-browser snapshot" })
+# Returns tree like:
+# @e1 heading "Welcome"
+# @e2 textbox "Email"
+# @e3 textbox "Password"
+# @e4 button "Sign In"
+
+# 4. Interact using refs (more reliable than selectors)
+mcp__task-manager__bash_docker({ command: "agent-browser fill @e2 'user@example.com'" })
+mcp__task-manager__bash_docker({ command: "agent-browser fill @e3 'password123'" })
+mcp__task-manager__bash_docker({ command: "agent-browser click @e4" })
+
+# 5. Wait for navigation/elements
+mcp__task-manager__bash_docker({ command: "agent-browser wait '.dashboard'" })
+
+# 6. Verify and capture results
+mcp__task-manager__bash_docker({ command: "agent-browser evaluate 'document.title'" })
+mcp__task-manager__bash_docker({ command: "agent-browser screenshot login-success.png" })
+```
+
+### Advanced Testing Patterns
+
+#### Form Validation Testing
+```bash
+# Test required field validation
+mcp__task-manager__bash_docker({ command: "agent-browser fill '#email' ''" })
+mcp__task-manager__bash_docker({ command: "agent-browser click '#submit'" })
+mcp__task-manager__bash_docker({ command: "agent-browser wait '.error-message'" })
+mcp__task-manager__bash_docker({ command: "agent-browser find text 'Email is required'" })
+```
+
+#### Responsive Design Testing
+```bash
+# Test mobile viewport
+mcp__task-manager__bash_docker({ command: "agent-browser resize 375 812" })
+mcp__task-manager__bash_docker({ command: "agent-browser screenshot mobile-view.png" })
+mcp__task-manager__bash_docker({ command: "agent-browser find '.mobile-menu'" })
+
+# Test desktop viewport
+mcp__task-manager__bash_docker({ command: "agent-browser resize 1920 1080" })
+mcp__task-manager__bash_docker({ command: "agent-browser screenshot desktop-view.png" })
+mcp__task-manager__bash_docker({ command: "agent-browser find '.desktop-nav'" })
+```
+
+#### API Integration Testing
+```bash
+# Trigger API call and verify response
+mcp__task-manager__bash_docker({ command: "agent-browser click '#fetch-data'" })
+mcp__task-manager__bash_docker({ command: "agent-browser wait '.data-grid'" })
+mcp__task-manager__bash_docker({ command: "agent-browser find text 'Results: 25 items'" })
+```
+
+### Advantages Over Playwright Scripts
+
+**Before (Playwright):** 30+ line Node.js script
+```javascript
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  await page.goto('http://localhost:3000');
+  await page.fill('#email', 'test@example.com');
+  await page.click('#submit');
+  // ... more code ...
+  await browser.close();
+})();
+```
+
+**After (agent-browser):** 5 simple commands
+```bash
+agent-browser open localhost:3000
+agent-browser fill "#email" "test@example.com"
+agent-browser click "#submit"
+agent-browser wait ".success"
+agent-browser screenshot result.png
+```
+
+### Troubleshooting agent-browser
+
+#### Common Issues and Solutions
+
+**Daemon not starting:**
+```bash
+# Check if port 3456 is in use
+mcp__task-manager__bash_docker({ command: "lsof -i :3456" })
+# Kill existing daemon
+mcp__task-manager__bash_docker({ command: "pkill -f 'agent-browser daemon'" })
+# Restart with logging
+mcp__task-manager__bash_docker({ command: "agent-browser daemon > /tmp/browser-daemon.log 2>&1 &" })
+```
+
+**Browser not launching:**
+```bash
+# Reinstall browser dependencies
+mcp__task-manager__bash_docker({ command: "agent-browser install --with-deps" })
+```
+
+**Element not found:**
+```bash
+# Get fresh snapshot to see current refs
+mcp__task-manager__bash_docker({ command: "agent-browser snapshot" })
+# Use wait before interacting
+mcp__task-manager__bash_docker({ command: "agent-browser wait '#element'" })
+```
 
 ---
 

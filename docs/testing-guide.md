@@ -1,19 +1,22 @@
 # YokeFlow Testing Guide
 
+**Last Updated**: February 2, 2026 (v2.1 cleanup)
+
 ## Overview
 
-YokeFlow has a comprehensive test suite with **72 passing tests** across multiple test categories. Tests are organized to support both rapid development (fast unit tests) and comprehensive validation (integration tests).
+YokeFlow has a comprehensive test suite with **402 passing tests** across multiple test categories. Tests are organized to support both rapid development (fast unit tests) and comprehensive validation (integration tests).
 
-## Test Suite Status
+## Test Suite Status (v2.1.0)
 
-- **Total Tests**: ~212 tests across all test files
-- **Core Tests**: 72 passing (100% pass rate, < 30 seconds)
-- **API Tests**: 17 passing, 2 skipped (auth not yet implemented)
-- **Verification Tests**: 55 passing (task verifier, epic validator, test generator)
+- **Total Tests**: 402 passing, 10 skipped
+- **Test Runtime**: < 3 seconds for fast tests (excludes slow Docker tests)
 - **Coverage**: 70% overall target achieved ✅
-- **Runtime**:
-  - Fast tests: < 30 seconds
-  - All tests (including Docker): 5-10 minutes
+- **Status**: All tests passing after v2.1 cleanup ✅
+
+### Recent Cleanup (February 2026)
+- Removed 2 obsolete test files (verification modules removed in v2.1)
+- Fixed 9 broken tests across 4 files
+- Updated to match v2.1 quality system architecture
 
 ## Prerequisites for Testing
 
@@ -60,18 +63,21 @@ pytest -m "not slow"
 
 ## Test Organization
 
-### Core Test Files (Always Run)
+### Core Test Files (Fast Development Tests)
 
 | Test File | Tests | Focus | Runtime |
 |-----------|-------|-------|---------|
 | `test_orchestrator.py` | 17 | Session lifecycle, orchestration | < 1s |
-| `test_quality_integration.py` | 10 | Quality system integration | < 1s |
 | `test_sandbox_manager.py` | 17 | Docker sandbox (mocked) | < 1s |
 | `test_security.py` | 2 | Security validation (64 assertions) | < 1s |
-| `test_task_verifier.py` | 11 | Task verification system | < 1s |
-| `test_test_generator.py` | 15 | Test generation system | < 1s |
+| `test_database_retry.py` | 30 | Database retry with exponential backoff | < 1s |
+| `test_checkpoint.py` | 19 | Session checkpointing and recovery | < 1s |
+| `test_errors.py` | 36 | Error hierarchy (99% coverage) | < 1s |
+| `test_spec_parser.py` | 25 | Spec parsing for completion reviews | < 1s |
+| `test_quality_detector.py` | 27 | Quality pattern detection | < 1s |
+| `test_epic_test_blocking.py` | 5 | Epic test blocking logic | < 1s |
 
-**Total Core Tests**: 72 tests, all passing
+**Note**: Old verification test files (`test_task_verifier.py`, `test_epic_validator.py`, `test_test_generator.py`) were removed in v2.1 when the verification system was redesigned.
 
 ### Integration Test Files (Slower)
 
@@ -94,10 +100,10 @@ These test files cover specific components with full test coverage:
 - `test_session_manager.py` (15 tests) - Session pause/resume functionality
 - `test_structured_logging.py` (19 tests) - Logging system (93% coverage)
 
-**Verification System Tests:**
-- `test_task_verifier.py` (11 tests) - Task verification with retry logic
-- `test_epic_validator.py` (13 tests) - Epic validation and rework tasks
-- `test_test_generator.py` (15 tests) - Automatic test generation
+**Quality System Tests (v2.1):**
+- `test_spec_parser.py` (25 tests) - Specification parsing for completion reviews
+- `test_quality_detector.py` (27 tests) - Quality pattern detection and scoring
+- `test_epic_test_blocking.py` (5 tests) - Epic test blocking logic
 - `test_verification_simple.py` (16 tests) - Verification data classes and initialization
 
 **Input Validation Tests:**

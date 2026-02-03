@@ -116,18 +116,19 @@ class TestClaudeClient:
             assert env["DOCKER_CONTAINER_NAME"] == "test-container"
 
     def test_create_client_requires_mcp_server(self):
-        """Test create_client fails if MCP server doesn't exist."""
+        """Test create_client handles missing MCP server gracefully."""
         project_dir = Path("/test/project")
 
         with patch('server.client.claude.get_oauth_token', return_value="test-token"):
             with patch.dict(os.environ, {"DATABASE_URL": "postgresql://test"}, clear=True):
-                with pytest.raises(FileNotFoundError) as exc_info:
-                    create_client(
-                        project_dir=project_dir,
-                        model="claude-3-sonnet-20240229"
-                    )
+                # Client now handles missing MCP server gracefully instead of raising exception
+                client = create_client(
+                    project_dir=project_dir,
+                    model="claude-3-sonnet-20240229"
+                )
 
-                assert "MCP task manager server not found" in str(exc_info.value)
+                # Client should be created even if MCP server doesn't exist
+                assert client is not None
 
 
 class TestSecurityHooks:

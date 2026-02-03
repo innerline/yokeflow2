@@ -35,6 +35,14 @@ class ModelConfig:
         "DEFAULT_CODING_MODEL",
         "claude-sonnet-4-5-20250929"
     ))
+    review: str = field(default_factory=lambda: os.getenv(
+        "DEFAULT_REVIEW_MODEL",
+        "claude-sonnet-4-5-20250929"
+    ))
+    prompt_improvement: str = field(default_factory=lambda: os.getenv(
+        "DEFAULT_PROMPT_IMPROVEMENT_MODEL",
+        "claude-opus-4-5-20251101"
+    ))
 
 
 @dataclass
@@ -43,6 +51,8 @@ class TimingConfig:
     auto_continue_delay: int = 3  # seconds between sessions
     web_ui_poll_interval: int = 5  # seconds for UI refresh
     web_ui_port: int = 3000
+    sandbox_startup_timeout: int = 120  # seconds to wait for Docker sandbox to start
+    initialization_max_retries: int = 2  # number of attempts if initialization fails to start
 
 
 @dataclass
@@ -129,6 +139,49 @@ class VerificationConfig:
 
 
 @dataclass
+class EpicTestingConfig:
+    """Configuration for epic testing policies."""
+    mode: str = 'autonomous'  # 'strict' or 'autonomous'
+
+    # Strict mode settings
+    strict_block_on_failure: bool = True
+    strict_require_all_pass: bool = True
+    strict_notify_on_block: bool = True
+    strict_max_fix_attempts: int = 2
+
+    # Autonomous mode settings
+    auto_block_on_critical: bool = True
+    auto_failure_tolerance: int = 3
+    auto_continue_on_failure: bool = True
+    auto_create_fix_tasks: bool = True
+
+    # Critical epic patterns (substring match)
+    critical_epics: List[str] = field(default_factory=lambda: [
+        'Authentication', 'Database', 'Payment', 'Security', 'Core API'
+    ])
+
+    # Regression testing
+    regression_enabled: bool = False  # Disabled by default for now
+    regression_frequency: int = 10
+    regression_random_chance: float = 0.1
+    regression_skip_screenshots: bool = True
+
+    def is_critical_epic(self, epic_name: str) -> bool:
+        """Check if an epic is considered critical."""
+        epic_lower = epic_name.lower()
+        return any(critical.lower() in epic_lower for critical in self.critical_epics)
+
+    def should_block(self, epic_name: str, failure_count: int) -> bool:
+        """Determine if epic should be blocked based on mode and failures."""
+        if self.mode == 'strict':
+            return self.strict_block_on_failure and failure_count > 0
+        else:  # autonomous
+            is_critical = self.is_critical_epic(epic_name)
+            exceeds_tolerance = failure_count > self.auto_failure_tolerance
+            return (is_critical and self.auto_block_on_critical) or exceeds_tolerance
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     models: ModelConfig = field(default_factory=ModelConfig)
@@ -140,6 +193,7 @@ class Config:
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     intervention: InterventionConfig = field(default_factory=InterventionConfig)
     verification: VerificationConfig = field(default_factory=VerificationConfig)
+    epic_testing: EpicTestingConfig = field(default_factory=EpicTestingConfig)
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'Config':
@@ -167,6 +221,10 @@ class Config:
                 config.models.initializer = data['models']['initializer']
             if 'coding' in data['models']:
                 config.models.coding = data['models']['coding']
+            if 'review' in data['models']:
+                config.models.review = data['models']['review']
+            if 'prompt_improvement' in data['models']:
+                config.models.prompt_improvement = data['models']['prompt_improvement']
 
         # Override timing settings
         if 'timing' in data:
@@ -215,6 +273,19 @@ class Config:
                 config.sandbox.e2b_api_key = data['sandbox']['e2b_api_key']
             if 'e2b_tier' in data['sandbox']:
                 config.sandbox.e2b_tier = data['sandbox']['e2b_tier']
+
+        # Override epic_testing settings
+        if 'epic_testing' in data:
+            if 'mode' in data['epic_testing']:
+                config.epic_testing.mode = data['epic_testing']['mode']
+            if 'critical_epics' in data['epic_testing']:
+                config.epic_testing.critical_epics = data['epic_testing']['critical_epics']
+            if 'auto_failure_tolerance' in data['epic_testing']:
+                config.epic_testing.auto_failure_tolerance = data['epic_testing']['auto_failure_tolerance']
+            if 'auto_create_fix_tasks' in data['epic_testing']:
+                config.epic_testing.auto_create_fix_tasks = data['epic_testing']['auto_create_fix_tasks']
+            if 'strict_notify_on_block' in data['epic_testing']:
+                config.epic_testing.strict_notify_on_block = data['epic_testing']['strict_notify_on_block']
 
         return config
 

@@ -50,31 +50,7 @@ You should understand:
 - **mcp-task-manager/**: MCP server (TypeScript)
 - **schema/postgresql/**: Database schema (consolidated)
 - **docs/**: Comprehensive documentation
-- **tests/**: Test suite
-
-## Current Status
-
-**v2.0.0 Release**
-
-### What Just Happened
-- ✅ Complete documentation overhaul
-- ✅ CHANGELOG.md created
-- ✅ Version numbers updated (2.0.0)
-- ✅ Schema consolidated
-- ✅ All changes committed
-
-### Next Steps
-
-- **End-to-End Testing**: Test with real project to find any issues
-- **Git Tag**: Create v2.0.0 tag after testing
-- **Push Release**: Push to remote after validation
-
-## Future Development
-
-See **YOKEFLOW_REFACTORING_PLAN.md** for:
-- v2.1 roadmap (brownfield support, non-UI projects)
-- v2.2+ features (multi-user, templates, E2B)
-- Long-term vision
+- **tests/**: Test suited
 
 ## Quick Commands
 
@@ -84,9 +60,6 @@ uvicorn server.api.app:app --host 0.0.0.0 --port 8000 --reload
 
 # Start Web UI
 cd web-ui && npm run dev
-
-# Run tests
-python scripts/test_quick.py
 
 # Initialize database
 python scripts/init_database.py --docker

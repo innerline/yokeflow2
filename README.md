@@ -6,19 +6,41 @@ Build complete applications using Claude across multiple autonomous sessions.
 
 YokeFlow 2 is an autonomous coding platform that uses Claude to build applications from specifications.
 
-**Status**: Production Ready - v2.0.0 (January 2026) ✅
+**Status**: Production Ready - v2.1.0 (February 2026) ✅
 
 **Core Features:**
 - ✅ **Autonomous multi-session development** - Opus plans, Sonnet implements
-- ✅ **REST API (17+ endpoints)** - Complete control with 89% test coverage
-- ✅ **Input validation framework** - Pydantic models with 52 tests
+- ✅ **REST API (60+ endpoints)** - Complete control with comprehensive validation
+- ✅ **Input validation framework** - 19 Pydantic models with 52 tests
 - ✅ **Verification system** - Automated test generation & epic validation
+- ✅ **Quality system (6 phases + 2 partial)** - Test tracking, epic re-testing, prompt improvements ⭐ NEW v2.1
 - ✅ **Web UI** - Real-time monitoring with Next.js + TypeScript
-- ✅ **PostgreSQL database** - Async operations with retry logic
-- ✅ **Docker sandbox** - Secure execution with Playwright browser testing
-- ✅ **Quality system** - Automated reviews with trend tracking
-- ✅ **Production hardening** - Session checkpointing, intervention system
-- ✅ **Enterprise ready** - 70% test coverage (212 tests), structured logging
+- ✅ **PostgreSQL database** - Async operations with retry logic (21 tables, 19 views)
+- ✅ **Docker sandbox** - Secure execution with Playwright browser automation
+- ✅ **MCP Integration (20+ tools)** - Enhanced task management with quality tools ⭐ NEW v2.1
+- ✅ **Production hardening** - Session checkpointing, intervention system, database retry logic
+- ✅ **Enterprise ready** - 70% test coverage (212 tests), structured logging, error hierarchy
+
+## What's New in v2.1 (February 2026)
+
+**Comprehensive Quality System** implemented across 8 phases:
+
+- **Phase 1-2**: Test execution tracking - Error messages, execution time, retry counts, flaky test detection
+- **Phase 3**: Epic test blocking - Strict/autonomous modes, critical epic patterns
+- **Phase 5**: Epic re-testing - Smart selection, regression detection (catches breaks within 2 epics), stability scoring
+- **Phase 6**: Enhanced review triggers - 7 quality-based conditions (removed periodic trigger)
+- **Phase 7** (⚠️ disabled): Project completion review - Implemented but needs enhancement (see [YOKEFLOW_FUTURE_PLAN.md](YOKEFLOW_FUTURE_PLAN.md))
+- **Phase 8** (partial): Prompt improvement aggregation - Recommendation extraction (60% complete)
+
+**Key Additions:**
+- 5 new MCP tools (20+ total)
+- 43 new API endpoints (60+ total)
+- 7 database migrations
+- 4 new quality system tables
+- 10+ new files in `server/quality/`
+- Enhanced test tracking and epic re-testing
+
+See [QUALITY_SYSTEM_SUMMARY.md](QUALITY_SYSTEM_SUMMARY.md) for complete implementation details.
 
 ## Getting Started
 
@@ -50,8 +72,24 @@ Configure via `.yokeflow.yaml`:
 models:
   initializer: claude-opus-4-5-20251101
   coding: claude-sonnet-4-5-20250929
+  review: claude-sonnet-4-5-20250929           # ⭐ NEW v2.1
+  prompt_improvement: claude-opus-4-5-20251101 # ⭐ NEW v2.1
+
 timing:
   auto_continue_delay: 3
+
+# ⭐ NEW v2.1: Epic Testing Configuration
+epic_testing:
+  mode: autonomous  # or "strict"
+  critical_epics:
+    - Authentication
+    - Payment
+
+# ⭐ NEW v2.1: Epic Re-testing Configuration
+epic_retesting:
+  enabled: true
+  trigger_frequency: 2  # Re-test every 2 completed epics
+
 docker:
   enabled: true
 ```
@@ -72,11 +110,13 @@ server/
 │   ├── orchestrator.py  # Session lifecycle management
 │   ├── agent.py         # Agent loop and session logic
 │   ├── session_manager.py  # Intervention system
-│   └── checkpoint.py    # Session checkpointing
+│   ├── checkpoint.py    # Session checkpointing
+│   └── quality_detector.py  # Quality pattern detection ⭐ v2.1
 ├── api/                 # REST API & WebSocket
-│   ├── app.py           # FastAPI application (17+ endpoints)
-│   ├── validation.py    # Pydantic validation models
+│   ├── app.py           # FastAPI application (60+ endpoints)
+│   ├── validation.py    # Pydantic validation models (19 models)
 │   └── routes/          # API route modules
+│       └── prompt_improvements.py  # ⭐ v2.1
 ├── database/            # Database layer
 │   ├── operations.py    # PostgreSQL operations (async)
 │   ├── connection.py    # Connection pooling
@@ -86,13 +126,19 @@ server/
 │   ├── test_generator.py  # Test generation (15 tests)
 │   ├── epic_validator.py  # Epic validation (14 tests)
 │   └── integration.py   # MCP tool interception
-├── quality/             # Quality & review system
-│   ├── metrics.py       # Quick checks (zero-cost)
-│   ├── reviews.py       # Deep reviews (AI-powered)
-│   └── integration.py   # Quality integration
+├── quality/             # Quality & review system ⭐ v2.1 Enhanced
+│   ├── metrics.py       # Quick checks (Phase 1)
+│   ├── reviews.py       # Deep reviews (Phase 2)
+│   ├── integration.py   # Quality integration (Phase 6)
+│   ├── completion_analyzer.py  # Completion reviews (Phase 7)
+│   ├── spec_parser.py   # Specification parser (Phase 7)
+│   ├── requirement_matcher.py  # Requirement matching (Phase 7)
+│   ├── epic_retest_manager.py  # Epic re-testing (Phase 5)
+│   ├── test_compliance_analyzer.py  # Test compliance
+│   └── prompt_analyzer.py  # Prompt improvements (Phase 8)
 ├── client/              # External service clients
 │   ├── claude.py        # Claude SDK client
-│   ├── playwright.py    # Playwright Docker client
+│   ├── playwright.py    # Browser automation (Playwright)
 │   └── prompts.py       # Prompt loading
 ├── sandbox/             # Docker management
 │   ├── manager.py       # Docker sandbox management
@@ -101,16 +147,18 @@ server/
     ├── config.py        # Configuration management
     ├── logging.py       # Structured logging
     ├── errors.py        # Error hierarchy (30+ types)
-    └── security.py      # Blocklist validation
+    ├── security.py      # Blocklist validation
+    ├── observability.py # Session logging
+    └── metrics_collector.py  # Metrics collection ⭐ v2.1
 ```
 
 **Key Components:**
 
-- **REST API**: 17 endpoints for complete platform control (health, sessions, tasks, epics, quality)
+- **REST API**: 60+ endpoints for complete platform control (health, sessions, tasks, epics, quality, completion reviews, interventions, containers)
 - **Verification System**: Automated test generation for 5 test types (unit, API, browser, integration, E2E)
-- **Quality System**: Automated reviews with metrics, deep analysis, and trend tracking
-- **Production Features**: Database retry logic, session checkpointing, intervention system
-- **MCP Integration**: 15+ tools for task management and workflow control
+- **Quality System (v2.1)**: 6-phase system (+ 2 partial) with test tracking, epic re-testing, prompt improvements
+- **Production Features**: Database retry logic, session checkpointing, intervention system, structured logging
+- **MCP Integration**: 20+ tools for task management, quality monitoring, and epic re-testing
 
 ## Generated Project Structure
 
@@ -130,6 +178,15 @@ cd generations/my_project
 ./init.sh
 # Or: npm install && npm run dev
 ```
+
+## Browser Automation
+
+YokeFlow uses different browser automation approaches optimized for each environment:
+
+- **Docker Mode**: Uses [agent-browser](https://agent-browser.dev) - AI-optimized CLI with accessibility-first approach
+- **Local Mode**: Uses Playwright MCP - Full-featured browser automation with rich API
+
+This dual approach provides simple commands in containers while maintaining full capabilities for local development.
 
 ## Testing
 
@@ -155,7 +212,6 @@ pytest --cov=server --cov-report=html --cov-report=term-missing
 For detailed testing information, see:
 - [docs/testing-guide.md](docs/testing-guide.md) - Developer guide
 - [tests/README.md](tests/README.md) - Test descriptions
-- [TEST_SUITE_REPORT.md](TEST_SUITE_REPORT.md) - Coverage report
 
 ## What's New in v2.0
 
@@ -210,13 +266,12 @@ YokeFlow 2.0 represents a major milestone with complete platform functionality:
 - [docs/mcp-usage.md](docs/mcp-usage.md) - MCP tools documentation
 
 ### Systems
-- [docs/verification-system.md](docs/verification-system.md) - Automated testing (850+ lines)
+- [docs/quality-system.md](docs/quality-system.md) - Automated testing
 - [docs/input-validation.md](docs/input-validation.md) - Validation framework
 - [docs/docker-sandbox-implementation.md](docs/docker-sandbox-implementation.md) - Docker integration
 
 ### Database
 - [docs/postgres-setup.md](docs/postgres-setup.md) - PostgreSQL setup and schema
-- [docs/database-access-patterns.md](docs/database-access-patterns.md) - Database patterns
 
 ### Operations
 - [docs/deployment-guide.md](docs/deployment-guide.md) - Production deployment
@@ -227,7 +282,6 @@ YokeFlow 2.0 represents a major milestone with complete platform functionality:
 See [YOKEFLOW_REFACTORING_PLAN.md](YOKEFLOW_REFACTORING_PLAN.md) for:
 - P0/P1/P2 priorities and estimates
 - Remaining work (P1: ~30h, P2: ~20h)
-- Future enhancements in [TODO-FUTURE.md](TODO-FUTURE.md)
 
 ## Contributing
 

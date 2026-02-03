@@ -1,11 +1,11 @@
 # Dockerfile for YokeFlow Agent Sandbox with Playwright Support
-# Based on Playwright's official image with Node.js 20 LTS
+# Based on Playwright's official image with Ubuntu 24.04 (Noble)
 
-FROM mcr.microsoft.com/playwright:v1.57.0-focal
+FROM mcr.microsoft.com/playwright:v1.49.0-noble
 
-# Install Node.js 20 LTS (Playwright image comes with older Node)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs
+# The Playwright v1.49.0-noble image already includes Node.js 20 LTS
+# Verify and update Node.js if needed
+RUN node --version && npm --version
 
 # Install additional development dependencies
 RUN apt-get update && apt-get install -y \
@@ -23,8 +23,13 @@ RUN apt-get update && apt-get install -y \
 # Install global npm packages
 RUN npm install -g pnpm@latest npm@latest
 
+# Install agent-browser for AI-optimized browser automation
+# This provides a simpler CLI interface compared to Playwright scripts
+RUN npm install -g agent-browser && \
+    agent-browser install --with-deps
+
 # Pre-install Playwright browsers (already included in base image)
-# This ensures chromium, firefox, and webkit are available
+# This ensures chromium, firefox, and webkit are available for fallback
 
 # Create workspace directory
 WORKDIR /workspace

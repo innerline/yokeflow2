@@ -10,6 +10,11 @@ export interface Progress {
   completed_tasks: number;
   total_tests: number;
   passing_tests: number;
+  // New fields for separate test counts
+  total_task_tests?: number;
+  passing_task_tests?: number;
+  total_epic_tests?: number;
+  passing_epic_tests?: number;
   task_completion_pct: number;
   test_pass_pct: number;
 }
@@ -37,7 +42,32 @@ export interface Test {
   passes: boolean | null;
   created_at: string;
   verified_at: string | null;
-  result?: any; // JSONB test result data
+  test_type?: string; // unit, api, browser, database, integration
+  // Requirements-based testing (replaces test_code)
+  requirements?: string;
+  success_criteria?: string;
+  verification_notes?: string;
+  last_execution?: string | null;
+  last_result?: string | null; // passed, failed, skipped, error
+  execution_log?: string | null;
+}
+
+export interface EpicTest {
+  id: string; // UUID
+  epic_id: number;
+  name: string;
+  description: string;
+  test_type: string; // integration, e2e, workflow
+  // Requirements-based testing (replaces test_code)
+  requirements?: string;
+  success_criteria?: string;
+  key_verification_points?: any; // JSONB
+  depends_on_tasks?: string[]; // Array of task UUIDs
+  last_execution?: string | null;
+  last_result?: string | null; // passed, failed, skipped, error
+  execution_log?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Epic {
@@ -64,6 +94,7 @@ export interface TaskWithTests extends Task {
 
 export interface EpicWithTasks extends Epic {
   tasks: TaskWithTestCount[];
+  epic_tests?: EpicTest[];
 }
 
 export interface Project {
@@ -107,6 +138,8 @@ export interface SessionMetrics {
   epics_created?: number;
   tasks_created?: number;
   tests_created?: number;
+  quality_score?: number;  // Quality rating 0-10
+  needs_deep_review?: boolean;
 }
 
 export interface Session {
@@ -271,6 +304,8 @@ export interface TestCoverageOverall {
   total_epics: number;
   total_tasks: number;
   total_tests: number;
+  total_task_tests?: number;  // Tests for tasks
+  total_epic_tests?: number;   // Epic integration tests
   tasks_with_tests: number;
   tasks_without_tests: number;
   avg_tests_per_task: number;
@@ -284,6 +319,8 @@ export interface TestCoverageEpic {
   tasks_with_tests: number;
   tasks_without_tests: number;
   total_tests: number;
+  total_task_tests?: number;   // Tests for tasks in this epic
+  total_epic_tests?: number;   // Integration tests for this epic
   coverage_percentage: number;
   tasks_0_tests: Task[];
   tasks_1_test: Task[];

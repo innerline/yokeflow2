@@ -26,11 +26,11 @@ First, analyze what types of tasks were worked on:
 - **Integration Tasks** (workflows, E2E) → Browser testing REQUIRED
 
 Then evaluate verification appropriateness:
-- **UI/Integration Tasks:**
-  - 50+ Playwright calls = Excellent (9-10)
-  - 10-49 calls = Good (7-8)
-  - 1-9 calls = Poor (4-6)
-  - 0 calls = Critical (1-3)
+- **UI/Integration Tasks (Browser operations include both Playwright and agent-browser):**
+  - 50+ browser operations = Excellent (9-10)
+  - 10-49 operations = Good (7-8)
+  - 1-9 operations = Poor (4-6)
+  - 0 operations = Critical (1-3)
 
 - **API/Config/Database Tasks:**
   - Appropriate non-browser testing = Excellent (9-10)
@@ -64,7 +64,9 @@ First, identify task types completed in this session:
 - Note which verification method was used for each
 
 **For UI/Integration Tasks - Browser Verification Required:**
-- How many Playwright calls total?
+- How many browser operations total? (Count both Playwright MCP tools AND agent-browser Docker commands)
+  - Direct Playwright: mcp__playwright__* tools
+  - Agent-browser: bash_docker commands with "agent-browser"
 - Screenshots before/after changes?
 - User interactions tested (clicks, forms, navigation)?
 - Console error checking implemented?
@@ -320,7 +322,13 @@ For each issue, provide:
 
 ## STRUCTURED DATA EXTRACTION
 
-After generating the markdown review above, also provide structured recommendations in the following JSON format for database storage (this will be automatically extracted and stored in the `prompt_improvements` JSONB field):
+After generating the markdown review above, also provide structured recommendations in the following JSON format for database storage (this will be automatically extracted and stored in the `prompt_improvements` JSONB field).
+
+**IMPORTANT - Keep Proposals Concise:**
+- The `proposed_text` should be a minimal, targeted replacement - NOT a complete rewrite
+- Focus on the specific lines that need to change (typically 1-10 lines)
+- Remember the entire prompt file is under 250 lines, so proposals should be proportionally small
+- Multiple small, specific proposals are better than one large rewrite
 
 ```json
 {
@@ -330,8 +338,8 @@ After generating the markdown review above, also provide structured recommendati
       "priority": "HIGH|MEDIUM|LOW",
       "theme": "browser_verification|docker_mode|testing|error_handling|git_commits|parallel_execution|task_management|prompt_adherence|general",
       "problem": "Detailed problem description with evidence from session",
-      "current_text": "The exact current prompt text that needs improvement (if applicable)",
-      "proposed_text": "The complete improved prompt text with all changes",
+      "current_text": "The exact problematic text from the current prompt (1-5 lines max)",
+      "proposed_text": "Concise replacement text (keep minimal - only what needs to change, 1-10 lines typical)",
       "impact": "Expected improvement in future sessions",
       "confidence": 8,
       "evidence": ["Session event or metric supporting this recommendation"]
