@@ -123,7 +123,10 @@ class TaskDatabase:
         name: str,
         spec_file_path: str,
         spec_content: Optional[str] = None,
-        user_id: Optional[UUID] = None
+        user_id: Optional[UUID] = None,
+        project_type: str = 'greenfield',
+        source_commit_sha: Optional[str] = None,
+        codebase_analysis: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new project.
@@ -133,6 +136,9 @@ class TaskDatabase:
             spec_file_path: Path to specification file
             spec_content: Content of spec file (for hash calculation)
             user_id: Optional user ID for multi-user support
+            project_type: 'greenfield' or 'brownfield'
+            source_commit_sha: Git commit SHA at import time (brownfield)
+            codebase_analysis: Automated analysis of imported codebase (brownfield)
 
         Returns:
             Created project record as dictionary
@@ -141,14 +147,18 @@ class TaskDatabase:
         if spec_content:
             spec_hash = hashlib.sha256(spec_content.encode()).hexdigest()
 
+        analysis_json = json.dumps(codebase_analysis) if codebase_analysis else '{}'
+
         async with self.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO projects (name, spec_file_path, spec_hash, user_id)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO projects (name, spec_file_path, spec_hash, user_id,
+                                      project_type, source_commit_sha, codebase_analysis)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
                 RETURNING *
                 """,
-                name, spec_file_path, spec_hash, user_id
+                name, spec_file_path, spec_hash, user_id,
+                project_type, source_commit_sha, analysis_json
             )
             return dict(row)
 
@@ -254,6 +264,24 @@ class TaskDatabase:
 
         async with self.acquire() as conn:
             await conn.execute(query, *values)
+
+    async def update_codebase_analysis(
+        self,
+        project_id: UUID,
+        analysis: Dict[str, Any]
+    ) -> None:
+        """
+        Update the codebase analysis for a brownfield project.
+
+        Args:
+            project_id: Project UUID
+            analysis: Structured analysis dict (languages, frameworks, etc.)
+        """
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE projects SET codebase_analysis = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(analysis), project_id
+            )
 
     async def rename_project(
         self,

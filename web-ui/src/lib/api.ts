@@ -147,6 +147,39 @@ class ApiClient {
     return response.data;
   }
 
+  async importProject(
+    name: string,
+    sourceUrl: string | null,
+    sourcePath: string | null,
+    branch: string = 'main',
+    changeSpecContent: string | null = null,
+    sandboxType: 'docker' | 'local' = 'docker',
+    initializerModel?: string,
+    codingModel?: string,
+  ): Promise<CreateProjectResponse> {
+    const formData = new FormData();
+    formData.append('name', name);
+    if (sourceUrl) formData.append('source_url', sourceUrl);
+    if (sourcePath) formData.append('source_path', sourcePath);
+    formData.append('branch', branch);
+    if (changeSpecContent) formData.append('change_spec_content', changeSpecContent);
+    formData.append('sandbox_type', sandboxType);
+    if (initializerModel) formData.append('initializer_model', initializerModel);
+    if (codingModel) formData.append('coding_model', codingModel);
+
+    const response = await this.client.post<CreateProjectResponse>('/api/projects/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async rollbackProject(projectId: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post(`/api/projects/${projectId}/rollback`);
+    return response.data;
+  }
+
   async deleteProject(projectId: string): Promise<void> {
     await this.client.delete(`/api/projects/${projectId}`);
   }

@@ -119,6 +119,84 @@ class ProjectCreateRequest(BaseModel):
         return self
 
 
+class ImportProjectRequest(BaseModel):
+    """Request model for importing an existing codebase (brownfield project)."""
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_PROJECT_NAME_LENGTH,
+        description="Unique project name (alphanumeric, hyphens, underscores, dots)"
+    )
+    source_url: Optional[str] = Field(
+        None,
+        description="Git repository URL (HTTPS or SSH)"
+    )
+    source_path: Optional[str] = Field(
+        None,
+        description="Local filesystem path to existing codebase"
+    )
+    branch: str = Field(
+        "main",
+        description="Git branch to import from"
+    )
+    change_spec_content: Optional[str] = Field(
+        None,
+        min_length=10,
+        description="Description of changes to make (at least 10 characters)"
+    )
+    sandbox_type: str = Field("docker")
+    initializer_model: Optional[str] = None
+    coding_model: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_project_name(cls, v: str) -> str:
+        """Validate project name format."""
+        if not VALID_PROJECT_NAME_PATTERN.match(v):
+            raise ValueError(
+                f"Project name must contain only alphanumeric characters, "
+                f"hyphens, underscores, and dots. Got: {v}"
+            )
+        return v
+
+    @field_validator('source_url')
+    @classmethod
+    def validate_source_url(cls, v: Optional[str]) -> Optional[str]:
+        """Validate git repository URL format."""
+        if v is None:
+            return v
+        if not (v.startswith('https://') or v.startswith('git@') or v.startswith('ssh://')):
+            raise ValueError(
+                "Source URL must be a valid git URL (https://, git@, or ssh://)"
+            )
+        return v
+
+    @field_validator('source_path')
+    @classmethod
+    def validate_source_path(cls, v: Optional[str]) -> Optional[str]:
+        """Validate source path is absolute."""
+        if v is None:
+            return v
+        if not Path(v).is_absolute():
+            raise ValueError("Source path must be an absolute path")
+        return v
+
+    @model_validator(mode='after')
+    def validate_exactly_one_source(self):
+        """Ensure exactly one of source_url or source_path is provided."""
+        has_url = self.source_url is not None
+        has_path = self.source_path is not None
+        if not has_url and not has_path:
+            raise ValueError(
+                "Either 'source_url' or 'source_path' must be provided"
+            )
+        if has_url and has_path:
+            raise ValueError(
+                "Provide only one of 'source_url' or 'source_path', not both"
+            )
+        return self
+
+
 class SessionStartRequest(BaseModel):
     """Request model for starting a session with validation."""
     initializer_model: Optional[str] = Field(

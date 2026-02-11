@@ -182,6 +182,14 @@ class EpicTestingConfig:
 
 
 @dataclass
+class BrownfieldConfig:
+    """Configuration for brownfield project settings."""
+    default_feature_branch_prefix: str = "yokeflow/"
+    run_existing_tests_before_changes: bool = True
+    run_existing_tests_after_changes: bool = True
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     models: ModelConfig = field(default_factory=ModelConfig)
@@ -194,6 +202,7 @@ class Config:
     intervention: InterventionConfig = field(default_factory=InterventionConfig)
     verification: VerificationConfig = field(default_factory=VerificationConfig)
     epic_testing: EpicTestingConfig = field(default_factory=EpicTestingConfig)
+    brownfield: BrownfieldConfig = field(default_factory=BrownfieldConfig)
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'Config':
@@ -286,6 +295,15 @@ class Config:
                 config.epic_testing.auto_create_fix_tasks = data['epic_testing']['auto_create_fix_tasks']
             if 'strict_notify_on_block' in data['epic_testing']:
                 config.epic_testing.strict_notify_on_block = data['epic_testing']['strict_notify_on_block']
+
+        # Override brownfield settings
+        if 'brownfield' in data:
+            if 'default_feature_branch_prefix' in data['brownfield']:
+                config.brownfield.default_feature_branch_prefix = data['brownfield']['default_feature_branch_prefix']
+            if 'run_existing_tests_before_changes' in data['brownfield']:
+                config.brownfield.run_existing_tests_before_changes = data['brownfield']['run_existing_tests_before_changes']
+            if 'run_existing_tests_after_changes' in data['brownfield']:
+                config.brownfield.run_existing_tests_after_changes = data['brownfield']['run_existing_tests_after_changes']
 
         return config
 

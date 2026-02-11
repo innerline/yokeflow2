@@ -1,14 +1,14 @@
 # YokeFlow Future Development Roadmap
 
 *Created: January 4, 2026*
-*Updated: February 2, 2026 - Quality System Complete*
+*Updated: February 11, 2026 - Brownfield Support Implemented*
 
 ## Executive Summary
 
-YokeFlow v2.0 is **production-ready** with comprehensive test coverage (70%), complete REST API (17 endpoints), automated verification system, and production hardening features. This document outlines future enhancements to expand YokeFlow beyond greenfield web applications.
+YokeFlow v2.2 adds **brownfield support** — the ability to import existing codebases and create epics/tasks for improvements, bug fixes, or new features on top of them. This document outlines future enhancements to continue expanding YokeFlow.
 
-**Current Release**: v2.0 - Quality system complete (see [QUALITY_SYSTEM_SUMMARY.md](QUALITY_SYSTEM_SUMMARY.md))
-**Next Release**: v2.1 - Platform expansion and UI enhancements
+**Current Release**: v2.2 - Brownfield support (import, analyze, modify existing codebases)
+**Previous Releases**: v2.1 - Quality system, v2.0 - REST API + verification + production hardening
 **Long-term Vision**: Universal AI-powered development platform for all project types
 
 ---
@@ -213,40 +213,49 @@ This makes it more useful as a **post-initialization check** ("does the plan mat
 
 ---
 
-## 🚀 v2.2 Roadmap - Platform Expansion
+## 🚀 v2.2 - Brownfield Support ✅ COMPLETE
 
-Focus: Expand YokeFlow beyond greenfield web applications.
+**Status**: Implemented (February 11, 2026)
 
-### Priority 1: Brownfield Support for UI Projects (20-25h)
-**Goal**: Enable YokeFlow to modify existing web applications from GitHub
+YokeFlow now supports modifying existing codebases, not just greenfield development.
 
-#### Phase 1: GitHub Integration (8-10h)
-- Import existing GitHub repositories
-- Codebase analysis and structure detection
-- Automatic dependency detection
-- Generate initial roadmap from existing code
-- Push generated/modified projects back to GitHub
-- Branch management and pull request creation
+**What's Implemented**:
+- ✅ Import codebases from local paths or GitHub URLs (public + private repos)
+- ✅ Intelligent codebase analysis (20+ languages, 15+ frameworks, test/CI detection)
+- ✅ Specialized brownfield initializer prompt (scoped epics for changes, not full app)
+- ✅ Brownfield coding preamble (understand before modifying, preserve conventions, regression safety)
+- ✅ Feature branch workflow with rollback support
+- ✅ Web UI "Import Codebase" mode with full configuration
+- ✅ API endpoints: `POST /api/projects/import`, `POST /api/projects/{id}/rollback`
+- ✅ Pydantic validation for import requests (14 tests)
+- ✅ 43 brownfield-specific tests across 3 test files
+- ✅ Configuration via `.yokeflow.yaml` `brownfield:` section
 
-#### Phase 2: Code Modification Capabilities (8-10h)
-- Modify existing codebases (not just greenfield)
-- Incremental refactoring strategies
-- Safe modification with rollback support
-- Merge conflict resolution
-- Legacy code modernization patterns
+**Key Files**:
+- `server/agent/codebase_import.py` - Import & analysis engine (670 lines)
+- `prompts/initializer_prompt_brownfield.md` - Brownfield initializer prompt
+- `prompts/coding_preamble_brownfield.md` - Brownfield coding preamble
 
-#### Phase 3: Enhanced Testing for Modified Code (4-5h)
-- Regression test generation
-- Impact analysis (what changed, what might break)
-- Integration with existing test suites
-- Test coverage improvement automation
+**Not Yet Implemented** (future enhancement):
+- Push changes to remote (`git push` from UI)
+- Automatic PR creation via GitHub API
+- Container reuse optimization for brownfield initializers
 
-**Success Criteria**:
-- ✅ Import React/Next.js projects from GitHub
-- ✅ Generate epics/tasks for enhancements
-- ✅ Modify code safely with tests
-- ✅ Push changes back to GitHub as PR
-- ✅ Support for multiple frontend frameworks
+---
+
+## 🚀 v2.3+ Roadmap - Platform Expansion
+
+Focus: Expand YokeFlow beyond web applications and add GitHub workflow automation.
+
+### Priority 1: GitHub Push & PR Integration (6-8h)
+**Goal**: Complete the brownfield workflow with automated push and PR creation
+
+**Features**:
+- Push brownfield changes to remote from Web UI
+- Auto-generate PR descriptions from completed tasks/epics
+- `gh pr create` integration
+- API endpoints: `/api/projects/{id}/push`, `/api/projects/{id}/create-pr`
+- Web UI buttons for push and PR creation
 
 ### Priority 2: Non-UI Project Support (15-18h)
 **Goal**: Support backends, APIs, libraries, CLI tools, and data processing applications
@@ -358,9 +367,9 @@ Focus: Expand YokeFlow beyond greenfield web applications.
 
 ---
 
-## 📋 v2.2+ Future Enhancements
+## 📋 v2.3+ Future Enhancements
 
-These features are valuable but not critical for v2.1:
+These features are valuable but not critical for v2.2:
 
 ### 1. Multi-User Support & Team Collaboration (15-18h)
 **Goal**: Enable teams to collaborate on YokeFlow projects
@@ -443,15 +452,14 @@ These features are valuable but not critical for v2.1:
 
 ## 🔌 Integration Enhancements
 
-### 1. GitHub Integration (8-10h)
-**Features**:
-- Automatic repository creation
-- Branch management (feature branches per task)
-- Pull request creation with descriptions
+### 1. GitHub Integration Enhancements (6-8h)
+**Note**: Basic GitHub import and clone implemented in v2.2 brownfield support.
+
+**Remaining Features**:
+- Push changes and create PRs from Web UI (see Priority 1 above)
+- Automatic repository creation for greenfield projects
 - Issue tracking integration
-- Commit message generation
 - GitHub Actions workflow generation
-- README.md generation
 
 ### 2. Deployment Automation (10-12h)
 **Platforms**:
@@ -633,8 +641,8 @@ Consider adding additional detailed metrics to the expandable metrics view in Se
 
 **Comprehensive AI-Powered Development Platform** supporting:
 - **Greenfield Projects**: Create new applications from scratch ✅ (v2.0)
-- **Brownfield Projects**: Modify existing codebases (v2.1)
-- **All Project Types**: Web, API, library, CLI, data processing (v2.1)
+- **Brownfield Projects**: Modify existing codebases ✅ (v2.2)
+- **All Project Types**: Web, API, library, CLI, data processing (v2.3)
 - **Team Collaboration**: Multi-user with permissions (v2.2)
 - **Enterprise Features**: SSO, audit logs, compliance (v3.0+)
 - **Deployment**: One-click deploy to any platform (v2.2)

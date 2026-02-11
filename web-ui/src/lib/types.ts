@@ -116,6 +116,10 @@ export interface Project {
   needs_env_config: boolean;
   env_configured: boolean;
   spec_file_path: string;
+  // Brownfield support
+  project_type?: 'greenfield' | 'brownfield';
+  source_commit_sha?: string;
+  codebase_analysis?: Record<string, any>;
   // Legacy fields for backwards compatibility
   project_id?: string;  // Deprecated: use 'id' instead
   project_path?: string;  // Deprecated

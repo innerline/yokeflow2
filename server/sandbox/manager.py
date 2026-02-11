@@ -242,10 +242,24 @@ class DockerSandbox(Sandbox):
 
             # Decide whether to reuse or recreate
             if self.session_type == "initializer" and existing_container:
-                # Always recreate for initializer sessions (clean slate)
-                # logger.info("Initializer session: Removing existing container for clean slate")
-                existing_container.remove(force=True)
-                existing_container = None
+                project_type = self.config.get("project_type", "greenfield")
+                if project_type == "brownfield":
+                    # Brownfield: reuse container (imported codebase already present)
+                    if existing_container.status == "running":
+                        self.container_id = existing_container.id
+                        self.is_running = True
+                        await self._cleanup_container()
+                        return
+                    else:
+                        existing_container.start()
+                        self.container_id = existing_container.id
+                        self.is_running = True
+                        await self._cleanup_container()
+                        return
+                else:
+                    # Greenfield: always recreate for clean slate
+                    existing_container.remove(force=True)
+                    existing_container = None
             elif self.session_type == "coding" and existing_container:
                 # Reuse for coding sessions if running, restart if stopped
                 if existing_container.status == "running":

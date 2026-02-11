@@ -116,6 +116,12 @@ CREATE TABLE projects (
     -- Flexible metadata storage
     metadata JSONB DEFAULT '{}',
 
+    -- Brownfield support (v2.2)
+    project_type VARCHAR(20) DEFAULT 'greenfield'
+        CHECK (project_type IN ('greenfield', 'brownfield')),
+    source_commit_sha VARCHAR(40),
+    codebase_analysis JSONB DEFAULT '{}',
+
     -- Constraints
     CONSTRAINT valid_total_cost CHECK (total_cost_usd >= 0),
     CONSTRAINT valid_total_time CHECK (total_time_seconds >= 0)
@@ -127,7 +133,11 @@ CREATE INDEX idx_projects_name ON projects(name);
 CREATE INDEX idx_projects_metadata ON projects USING GIN (metadata);
 CREATE INDEX idx_projects_completed_at ON projects(completed_at);
 CREATE INDEX idx_projects_total_time ON projects(total_time_seconds);
+CREATE INDEX idx_projects_project_type ON projects(project_type);
 
+COMMENT ON COLUMN projects.project_type IS 'greenfield = new project from scratch, brownfield = modifications to existing codebase';
+COMMENT ON COLUMN projects.source_commit_sha IS 'Git commit SHA at import time for brownfield projects, used to track drift';
+COMMENT ON COLUMN projects.codebase_analysis IS 'Automated analysis of imported codebase: languages, frameworks, test suite, structure';
 COMMENT ON COLUMN projects.completed_at IS 'Timestamp when all epics/tasks/tests were completed. NULL means project is still in progress.';
 COMMENT ON COLUMN projects.total_time_seconds IS 'Total time spent on project in seconds, automatically aggregated from session durations';
 

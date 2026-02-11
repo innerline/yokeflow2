@@ -6,20 +6,40 @@ Build complete applications using Claude across multiple autonomous sessions.
 
 YokeFlow 2 is an autonomous coding platform that uses Claude to build applications from specifications.
 
-**Status**: Production Ready - v2.1.0 (February 2026) ✅
+**Status**: Production Ready - v2.2.0 (February 2026) ✅
 
 **Core Features:**
+- ✅ **Brownfield support** - Import existing codebases, analyze, and modify on feature branches ⭐ NEW v2.2
 - ✅ **Autonomous multi-session development** - Opus plans, Sonnet implements
 - ✅ **REST API (60+ endpoints)** - Complete control with comprehensive validation
-- ✅ **Input validation framework** - 19 Pydantic models with 52 tests
+- ✅ **Input validation framework** - 20 Pydantic models with 66 tests
 - ✅ **Verification system** - Automated test generation & epic validation
-- ✅ **Quality system (6 phases + 2 partial)** - Test tracking, epic re-testing, prompt improvements ⭐ NEW v2.1
+- ✅ **Quality system (6 phases + 2 partial)** - Test tracking, epic re-testing, prompt improvements
 - ✅ **Web UI** - Real-time monitoring with Next.js + TypeScript
 - ✅ **PostgreSQL database** - Async operations with retry logic (21 tables, 19 views)
 - ✅ **Docker sandbox** - Secure execution with Playwright browser automation
-- ✅ **MCP Integration (20+ tools)** - Enhanced task management with quality tools ⭐ NEW v2.1
+- ✅ **MCP Integration (20+ tools)** - Enhanced task management with quality tools
 - ✅ **Production hardening** - Session checkpointing, intervention system, database retry logic
-- ✅ **Enterprise ready** - 70% test coverage (212 tests), structured logging, error hierarchy
+- ✅ **Enterprise ready** - 70% test coverage (255 tests), structured logging, error hierarchy
+
+## What's New in v2.2 (February 2026)
+
+**Brownfield Support** — import and modify existing codebases:
+
+- **Codebase import**: Clone from GitHub (public + private) or copy from local paths
+- **Intelligent analysis**: Auto-detects 20+ languages, 15+ frameworks, test systems, CI platforms
+- **Scoped roadmaps**: Brownfield initializer creates epics/tasks only for requested changes
+- **Regression safety**: Coding preamble enforces understanding before modifying, existing test runs
+- **Feature branches**: All modifications on `yokeflow/` branches with one-click rollback
+- **Full Web UI**: "Import Codebase" mode on project creation page
+- **43 new tests**: Comprehensive coverage for import, orchestration, and validation
+
+**Key Files:**
+- `server/agent/codebase_import.py` - Import & analysis engine (670 lines)
+- `prompts/initializer_prompt_brownfield.md` - Brownfield initializer prompt
+- `prompts/coding_preamble_brownfield.md` - Brownfield coding preamble
+
+See [YOKEFLOW_FUTURE_PLAN.md](YOKEFLOW_FUTURE_PLAN.md) for remaining roadmap (GitHub push/PR automation, non-UI project support).
 
 ## What's New in v2.1 (February 2026)
 
@@ -31,14 +51,6 @@ YokeFlow 2 is an autonomous coding platform that uses Claude to build applicatio
 - **Phase 6**: Enhanced review triggers - 7 quality-based conditions (removed periodic trigger)
 - **Phase 7** (⚠️ disabled): Project completion review - Implemented but needs enhancement (see [YOKEFLOW_FUTURE_PLAN.md](YOKEFLOW_FUTURE_PLAN.md))
 - **Phase 8** (partial): Prompt improvement aggregation - Recommendation extraction (60% complete)
-
-**Key Additions:**
-- 5 new MCP tools (20+ total)
-- 43 new API endpoints (60+ total)
-- 7 database migrations
-- 4 new quality system tables
-- 10+ new files in `server/quality/`
-- Enhanced test tracking and epic re-testing
 
 See [QUALITY_SYSTEM_SUMMARY.md](QUALITY_SYSTEM_SUMMARY.md) for complete implementation details.
 
@@ -56,8 +68,14 @@ See [QUICKSTART.md](QUICKSTART.md) for setup instructions.
 
 ## How It Works
 
-1. **Session 0 (Planning)**: Reads specification → Creates roadmap (epics/tasks/tests) in database
+**Greenfield** (new projects):
+1. **Session 0 (Planning)**: Reads `app_spec.txt` → Creates roadmap (epics/tasks/tests) in database
 2. **Sessions 1+ (Coding)**: Gets next task → Implements → Tests → Commits → Auto-continues
+
+**Brownfield** (existing codebases):
+1. **Import**: Clone from GitHub or copy from local path → Analyze codebase → Create feature branch
+2. **Session 0 (Planning)**: Explores existing code → Reads `change_spec.md` → Creates scoped epics/tasks
+3. **Sessions 1+ (Coding)**: Gets next task → Modifies existing code → Regression tests → Commits
 
 The system uses a hierarchical task structure:
 - Epics (high-level features)
@@ -107,11 +125,12 @@ YokeFlow 2 uses a clean, modular architecture with all server code under `server
 ```
 server/
 ├── agent/               # Session orchestration & lifecycle
-│   ├── orchestrator.py  # Session lifecycle management
+│   ├── orchestrator.py  # Session lifecycle management (greenfield + brownfield)
+│   ├── codebase_import.py  # Codebase import & analysis ⭐ v2.2
 │   ├── agent.py         # Agent loop and session logic
 │   ├── session_manager.py  # Intervention system
 │   ├── checkpoint.py    # Session checkpointing
-│   └── quality_detector.py  # Quality pattern detection ⭐ v2.1
+│   └── quality_detector.py  # Quality pattern detection
 ├── api/                 # REST API & WebSocket
 │   ├── app.py           # FastAPI application (60+ endpoints)
 │   ├── validation.py    # Pydantic validation models (19 models)
@@ -203,10 +222,9 @@ pytest -m "not slow"
 pytest --cov=server --cov-report=html --cov-report=term-missing
 ```
 
-**Test Status** (January 8, 2026):
-- ✅ **72 core tests passing** (100% pass rate)
+**Test Status** (February 2026):
+- ✅ **~255 total tests** across all files (including 43 brownfield tests)
 - ✅ **70% coverage achieved** (target met)
-- 📋 **~212 total tests** across all files
 - ✅ **Production ready** test infrastructure
 
 For detailed testing information, see:
@@ -287,7 +305,8 @@ See [YOKEFLOW_REFACTORING_PLAN.md](YOKEFLOW_REFACTORING_PLAN.md) for:
 
 YokeFlow is open for contributions! Areas of interest:
 - Authentication system implementation
-- Brownfield support (modify existing codebases)
+- GitHub push/PR automation for brownfield projects
+- Non-UI project support (APIs, libraries, CLI tools)
 - E2B sandbox integration
 - Performance optimizations
 - Test coverage improvements
@@ -299,6 +318,7 @@ MIT License - See LICENSE file for details
 ## Acknowledgments
 
 Originally forked from Anthropic's autonomous coding demo. Evolved into YokeFlow with extensive enhancements:
+- Brownfield support (import and modify existing codebases)
 - PostgreSQL database with async operations
 - REST API with comprehensive validation
 - Verification system with automated testing

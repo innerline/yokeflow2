@@ -144,6 +144,9 @@ class ProjectResponse(BaseModel):
     env_configured: bool = False
     spec_file_path: Optional[str] = None
     sandbox_type: Optional[str] = None  # Sandbox type: 'docker', 'local', etc.
+    project_type: str = "greenfield"  # 'greenfield' or 'brownfield'
+    source_commit_sha: Optional[str] = None
+    codebase_analysis: Optional[Dict[str, Any]] = None
 
 
 class SessionStart(BaseModel):
@@ -326,12 +329,18 @@ running_sessions: Dict[str, asyncio.Task] = {}
 
 
 # Helper function to convert datetime fields
+
+# JSONB fields that asyncpg returns as strings (no JSON codec registered on pool)
+_JSONB_FIELDS = {'metadata', 'codebase_analysis', 'sandbox_config', 'metrics', 'result'}
+
+
 def convert_datetimes_to_str(data: Dict[str, Any], fields: List[str] = None) -> Dict[str, Any]:
-    """Convert datetime fields to ISO format strings for JSON serialization."""
+    """Convert datetime fields to ISO format strings for JSON serialization.
+    Also parses JSONB fields that asyncpg returns as strings."""
     import uuid
     from datetime import datetime
     from decimal import Decimal
-    
+
     if fields is None:
         fields = ['created_at', 'updated_at', 'started_at', 'ended_at', 'env_configured_at', 'completed_at', 'verified_at']
 
@@ -341,6 +350,12 @@ def convert_datetimes_to_str(data: Dict[str, Any], fields: List[str] = None) -> 
         for key, value in data.items():
             if isinstance(value, (dict, list)):
                 result[key] = convert_datetimes_to_str(value, fields)
+            elif isinstance(value, str) and key in _JSONB_FIELDS:
+                # asyncpg returns JSONB as strings — parse them
+                try:
+                    result[key] = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    result[key] = value
             elif isinstance(value, uuid.UUID):
                 result[key] = str(value)
             elif isinstance(value, datetime) and (key in fields or key.endswith('_at')):
@@ -976,6 +991,98 @@ async def create_project(
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to create project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/import", response_model=ProjectResponse, dependencies=[Depends(check_rate_limit)])
+async def import_project(
+    request: Request,
+    name: str = Form(...),
+    source_url: Optional[str] = Form(None),
+    source_path: Optional[str] = Form(None),
+    branch: str = Form("main"),
+    change_spec: Optional[UploadFile] = File(None),
+    change_spec_content: Optional[str] = Form(None),
+    sandbox_type: str = Form("docker"),
+    initializer_model: Optional[str] = Form(None),
+    coding_model: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Import an existing codebase as a brownfield project.
+
+    Provide either source_url (Git repository) or source_path (local filesystem).
+    Optionally provide a change specification describing what to modify.
+    """
+    try:
+        # Validate project name format
+        import re
+        if not re.match(r'^[a-z0-9_-]+$', name):
+            raise HTTPException(
+                status_code=400,
+                detail="Project name must contain only lowercase letters, numbers, hyphens, and underscores"
+            )
+
+        # Validate source
+        if not source_url and not source_path:
+            raise HTTPException(status_code=400, detail="Either source_url or source_path is required")
+        if source_url and source_path:
+            raise HTTPException(status_code=400, detail="Provide only one of source_url or source_path")
+
+        # Read change spec from file upload if provided
+        spec_content = change_spec_content
+        if change_spec:
+            spec_content = (await change_spec.read()).decode('utf-8')
+
+        project = await orchestrator.create_brownfield_project(
+            project_name=name,
+            source_url=source_url,
+            source_path=source_path,
+            branch=branch,
+            change_spec_content=spec_content,
+            sandbox_type=sandbox_type,
+            initializer_model=initializer_model,
+            coding_model=coding_model,
+        )
+
+        # Convert for response
+        project_dict = dict(project)
+        project_dict['id'] = str(project_dict.get('id', ''))
+        project_dict = convert_datetimes_to_str(project_dict)
+        project_dict['progress'] = {'total_tasks': 0, 'completed_tasks': 0}
+        project_dict['active_sessions'] = []
+
+        return project_dict
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to import project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/rollback")
+async def rollback_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Reset a brownfield project to its original imported state.
+
+    Checks out the source branch, deletes the feature branch,
+    and removes all epics/tasks/tests from the database.
+    Only available for brownfield projects.
+    """
+    try:
+        project_uuid = UUID(project_id)
+        success = await orchestrator.rollback_brownfield_changes(project_uuid)
+        return {"success": success, "message": "Project rolled back to original state"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to rollback project: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

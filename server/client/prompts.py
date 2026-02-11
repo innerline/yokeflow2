@@ -24,18 +24,22 @@ def load_prompt(name: str) -> str:
     return prompt_path.read_text()
 
 
-def get_initializer_prompt() -> str:
-    """    Load the initializer prompt.
+def get_initializer_prompt(project_type: str = "greenfield") -> str:
+    """
+    Load the initializer prompt.
 
-    The initializer prompt is now unified - it works the same regardless
-    of sandbox type since it only creates files and directories (no server
-    operations).
+    For greenfield projects, uses the standard initializer prompt.
+    For brownfield projects, uses a specialized prompt that focuses on
+    understanding existing code and planning modifications.
+
+    Args:
+        project_type: 'greenfield' or 'brownfield'
 
     Returns:
         Complete initializer prompt content as string
     """
-
-    # Use the unified initializer prompt regardless of sandbox type
+    if project_type == "brownfield":
+        return load_prompt("initializer_prompt_brownfield")
     return load_prompt("initializer_prompt")
 
 
@@ -61,18 +65,34 @@ def get_coding_prompt(sandbox_type: str = "local") -> str:
     return load_prompt(prompt_name)
 
 
-def get_prompt_filename(session_type: str, sandbox_type: str = "local") -> str:
+def get_brownfield_coding_preamble() -> str:
+    """Load the brownfield coding session preamble.
+
+    This preamble is prepended to the standard coding prompt for
+    brownfield projects, adding instructions about preserving
+    existing code conventions and running regression tests.
+
+    Returns:
+        Brownfield coding preamble content as string
+    """
+    return load_prompt("coding_preamble_brownfield")
+
+
+def get_prompt_filename(session_type: str, sandbox_type: str = "local", project_type: str = "greenfield") -> str:
     """
     Get the prompt filename for logging purposes.
 
     Args:
         session_type: "initializer" or "coding"
         sandbox_type: "docker" or "local" (default: "local")
+        project_type: "greenfield" or "brownfield" (default: "greenfield")
 
     Returns:
         Prompt filename (e.g., "initializer_prompt_local.md")
     """
     if session_type == "initializer":
+        if project_type == "brownfield":
+            return "initializer_prompt_brownfield.md"
         if sandbox_type == "docker":
             return "initializer_prompt_docker.md"
         else:

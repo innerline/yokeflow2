@@ -37,8 +37,10 @@ if TYPE_CHECKING:
 from server.client.prompts import (
     get_initializer_prompt,
     get_coding_prompt,
+    get_brownfield_coding_preamble,
     copy_spec_to_project,
 )
+from server.agent.codebase_import import CodebaseImporter
 from server.utils.observability import SessionLogger, QuietOutputFilter, create_session_logger
 from server.agent.agent import run_agent_session, SessionManager
 from server.utils.config import Config
@@ -195,6 +197,220 @@ class AgentOrchestrator:
             await db.update_project_settings(project['id'], settings)
 
             return project
+
+    async def create_brownfield_project(
+        self,
+        project_name: str,
+        source_url: Optional[str] = None,
+        source_path: Optional[str] = None,
+        branch: str = "main",
+        change_spec_content: Optional[str] = None,
+        user_id: Optional[UUID] = None,
+        sandbox_type: str = "docker",
+        initializer_model: Optional[str] = None,
+        coding_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a brownfield project from an existing codebase.
+
+        The codebase is imported into generations/<project_name>/, analyzed,
+        and prepared for the brownfield initializer session which creates
+        epics/tasks scoped to the requested changes.
+
+        Args:
+            project_name: Name for the project (must be unique)
+            source_url: Git repository URL to clone from
+            source_path: Local filesystem path to copy from
+            branch: Git branch to import (default: main)
+            change_spec_content: Description of changes to make
+            user_id: User ID (optional)
+            sandbox_type: Sandbox type (docker or local)
+            initializer_model: Model for initialization (optional)
+            coding_model: Model for coding sessions (optional)
+
+        Returns:
+            Dict with project info
+
+        Raises:
+            ValueError: If project exists, no source provided, or import fails
+        """
+        import shutil
+
+        async with DatabaseManager() as db:
+            # Check if project exists
+            existing = await db.get_project_by_name(project_name)
+            if existing:
+                raise ValueError(
+                    f"A project named '{project_name}' already exists. "
+                    "Please choose a different name or delete the existing project first."
+                )
+
+            # Create project directory
+            generations_dir = Path(self.config.project.default_generations_dir)
+            project_path = generations_dir / project_name
+            project_path.mkdir(parents=True, exist_ok=True)
+
+            # Import codebase
+            importer = CodebaseImporter()
+            if source_url:
+                import_result = await importer.import_from_github(
+                    source_url, branch, project_path
+                )
+            elif source_path:
+                import_result = await importer.import_from_local(
+                    Path(source_path), project_path
+                )
+            else:
+                raise ValueError("Either source_url or source_path must be provided")
+
+            if not import_result.success:
+                # Clean up on failure
+                shutil.rmtree(project_path, ignore_errors=True)
+                raise ValueError(f"Import failed: {import_result.error}")
+
+            # Analyze codebase
+            analysis = await importer.analyze_codebase(project_path)
+
+            # Write change spec
+            if change_spec_content:
+                (project_path / "change_spec.md").write_text(change_spec_content)
+                (project_path / "app_spec.txt").write_text(
+                    "# Brownfield Project - Change Specification\n\n"
+                    "This is a brownfield project. The change specification "
+                    "is in: `change_spec.md`\n\n"
+                    "**Please read change_spec.md for what needs to be changed.**\n"
+                )
+
+            # Set up git feature branch
+            feature_branch = await importer.setup_brownfield_git(
+                project_path,
+                branch_name=f"{self.config.brownfield.default_feature_branch_prefix}modifications"
+            )
+
+            # Create project in database
+            project = await db.create_project(
+                name=project_name,
+                spec_file_path="change_spec.md",
+                spec_content=change_spec_content,
+                user_id=user_id,
+                project_type='brownfield',
+                source_commit_sha=import_result.commit_sha,
+                codebase_analysis=analysis.to_dict(),
+            )
+
+            # Update with local_path
+            await db.update_project(project['id'], local_path=str(project_path))
+            project['local_path'] = str(project_path)
+
+            # Store github_repo_url and github_branch for brownfield tracking
+            if source_url:
+                await db.update_project(
+                    project['id'],
+                    github_repo_url=source_url,
+                    github_branch=branch,
+                )
+
+            # Set project settings
+            settings = {
+                'sandbox_type': sandbox_type,
+                'project_type': 'brownfield',
+                'feature_branch': feature_branch,
+                'max_iterations': None,
+            }
+            if initializer_model:
+                settings['initializer_model'] = initializer_model
+            if coding_model:
+                settings['coding_model'] = coding_model
+
+            await db.update_project_settings(project['id'], settings)
+
+            logger.info(
+                f"Created brownfield project '{project_name}' from "
+                f"{'GitHub' if source_url else 'local'} source "
+                f"({import_result.file_count} files, "
+                f"{', '.join(analysis.languages[:3])} detected)"
+            )
+
+            return project
+
+    async def rollback_brownfield_changes(self, project_id: UUID) -> bool:
+        """
+        Reset a brownfield project to its original imported state.
+
+        Checks out the source branch, deletes the feature branch,
+        and removes all epics/tasks/tests from the database.
+
+        Args:
+            project_id: UUID of the brownfield project
+
+        Returns:
+            True if rollback succeeded
+
+        Raises:
+            ValueError: If project not found or not a brownfield project
+        """
+        import subprocess
+
+        async with DatabaseManager() as db:
+            project = await db.get_project(project_id)
+            if not project:
+                raise ValueError(f"Project not found: {project_id}")
+
+            project_type = project.get('project_type', 'greenfield')
+            if project_type != 'brownfield':
+                raise ValueError("Rollback is only available for brownfield projects")
+
+            project_path = None
+            # Get local_path from metadata
+            metadata = project.get('metadata', {})
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+            local_path = metadata.get('local_path')
+            if local_path:
+                project_path = Path(local_path)
+
+            if not project_path or not project_path.exists():
+                raise ValueError(f"Project directory not found")
+
+            # Get source branch
+            source_branch = project.get('github_branch', 'main')
+
+            # Reset git to source branch
+            result = subprocess.run(
+                ['git', 'checkout', source_branch],
+                cwd=str(project_path), capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise ValueError(f"Git checkout failed: {result.stderr}")
+
+            # Delete feature branch
+            feature_prefix = self.config.brownfield.default_feature_branch_prefix
+            subprocess.run(
+                ['git', 'branch', '-D', f'{feature_prefix}modifications'],
+                cwd=str(project_path), capture_output=True, text=True
+            )
+
+            # Reset task/epic statuses in DB
+            async with db.acquire() as conn:
+                await conn.execute(
+                    """DELETE FROM tests WHERE task_id IN
+                       (SELECT id FROM tasks WHERE epic_id IN
+                        (SELECT id FROM epics WHERE project_id = $1))""",
+                    project_id
+                )
+                await conn.execute(
+                    """DELETE FROM tasks WHERE epic_id IN
+                       (SELECT id FROM epics WHERE project_id = $1)""",
+                    project_id
+                )
+                await conn.execute(
+                    "DELETE FROM epics WHERE project_id = $1",
+                    project_id
+                )
+
+            logger.info(f"Rolled back brownfield project {project_id}")
+            return True
 
     async def get_project_info(self, project_id: UUID) -> Dict[str, Any]:
         """
@@ -730,6 +946,7 @@ class AgentOrchestrator:
                 "cpu_limit": self.config.sandbox.docker_cpu_limit,
                 "ports": self.config.sandbox.docker_ports,
                 "session_type": session_type.value,  # "initializer" or "coding"
+                "project_type": project.get('project_type', 'greenfield'),
             }
             #logger.info(f"Creating {project_sandbox_type} sandbox for project {project_name}")
             sandbox = SandboxManager.create_sandbox(
@@ -832,18 +1049,41 @@ class AgentOrchestrator:
                     docker_container=docker_container
                 )
 
-                # Get prompt based on session type and sandbox
+                # Get prompt based on session type, sandbox, and project type
+                project_type = project.get('project_type', 'greenfield')
+
                 if is_initializer:
-                    base_prompt = get_initializer_prompt()
+                    base_prompt = get_initializer_prompt(project_type=project_type)
                     # Inject PROJECT_ID at the beginning of the prompt for easy access
                     prompt = f"PROJECT_ID: {project_id}\n\n{base_prompt}"
+
+                    # For brownfield, inject codebase analysis
+                    if project_type == 'brownfield':
+                        import json as json_mod
+                        analysis = project.get('codebase_analysis', {})
+                        if isinstance(analysis, str):
+                            try:
+                                analysis = json_mod.loads(analysis)
+                            except (json_mod.JSONDecodeError, TypeError):
+                                analysis = {}
+                        if analysis:
+                            analysis_str = json_mod.dumps(analysis, indent=2)
+                            prompt += (
+                                f"\n\n## Codebase Analysis (Pre-computed)\n"
+                                f"```json\n{analysis_str}\n```"
+                            )
                 elif resume_context:
                     # Include resume context in the prompt
                     base_prompt = get_coding_prompt(sandbox_type=sandbox_type)
                     resume_prompt = resume_context.get("resume_prompt", "")
                     prompt = f"{base_prompt}\n\n{resume_prompt}"
                 else:
-                    prompt = get_coding_prompt(sandbox_type=sandbox_type)
+                    base_prompt = get_coding_prompt(sandbox_type=sandbox_type)
+                    if project_type == 'brownfield':
+                        preamble = get_brownfield_coding_preamble()
+                        prompt = f"{preamble}\n\n{base_prompt}"
+                    else:
+                        prompt = base_prompt
 
                 # Start heartbeat task to prevent false-positive stale detection
                 heartbeat_task = None

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import SpecEditor from '@/components/SpecEditor';
 
-type CreationMode = 'upload' | 'generate';
+type CreationMode = 'upload' | 'generate' | 'import';
 
 interface GenerationProgress {
   stage: 'context' | 'generating' | 'validating' | 'complete';
@@ -43,6 +43,14 @@ export default function CreateProjectPage() {
     warnings: string[];
     suggestions: string[];
   } | null>(null);
+
+  // Import mode fields
+  const [sourceType, setSourceType] = useState<'github' | 'local'>('github');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourcePath, setSourcePath] = useState('');
+  const [sourceBranch, setSourceBranch] = useState('main');
+  const [changeSpec, setChangeSpec] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
 
   // Common state
   const [isCreating, setIsCreating] = useState(false);
@@ -286,12 +294,34 @@ export default function CreateProjectPage() {
       return;
     }
 
+    if (mode === 'import') {
+      if (sourceType === 'github' && !sourceUrl.trim()) {
+        setError('GitHub URL is required');
+        return;
+      }
+      if (sourceType === 'local' && !sourcePath.trim()) {
+        setError('Local path is required');
+        return;
+      }
+    }
+
     setIsCreating(true);
 
     try {
       let result;
 
-      if (mode === 'upload') {
+      if (mode === 'import') {
+        result = await api.importProject(
+          projectName,
+          sourceType === 'github' ? sourceUrl : null,
+          sourceType === 'local' ? sourcePath : null,
+          sourceBranch,
+          changeSpec || null,
+          sandboxType,
+          initializerModel,
+          codingModel
+        );
+      } else if (mode === 'upload') {
         // Use existing file upload method
         result = await api.createProjectWithFile(
           projectName,
@@ -342,7 +372,7 @@ export default function CreateProjectPage() {
         </div>
         <h1 className="text-4xl font-bold mb-2">Create New Project</h1>
         <p className="text-gray-600 dark:text-gray-400">
-          Upload a specification or describe what you want to build
+          Upload a specification, describe what you want to build, or import an existing codebase
         </p>
       </div>
 
@@ -358,7 +388,6 @@ export default function CreateProjectPage() {
           }`}
         >
           <div className="flex items-center justify-center gap-2">
-            <span>📄</span>
             <span>Upload Spec</span>
           </div>
         </button>
@@ -372,8 +401,20 @@ export default function CreateProjectPage() {
           }`}
         >
           <div className="flex items-center justify-center gap-2">
-            <span>✨</span>
             <span>Generate with AI</span>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('import')}
+          className={`flex-1 px-4 py-2 rounded-md transition-all ${
+            mode === 'import'
+              ? 'bg-purple-600 text-white'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+          }`}
+        >
+          <div className="flex items-center justify-center gap-2">
+            <span>Import Codebase</span>
           </div>
         </button>
       </div>
@@ -736,6 +777,106 @@ export default function CreateProjectPage() {
           </>
         )}
 
+        {/* Import Mode Content */}
+        {mode === 'import' && (
+          <>
+            {/* Source Type Toggle */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Import Source *
+              </label>
+              <div className="flex gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setSourceType('github')}
+                  className={`flex-1 px-4 py-2 rounded-md border transition-all ${
+                    sourceType === 'github'
+                      ? 'bg-purple-600/20 border-purple-500 text-purple-300'
+                      : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                  }`}
+                >
+                  GitHub / Git URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceType('local')}
+                  className={`flex-1 px-4 py-2 rounded-md border transition-all ${
+                    sourceType === 'local'
+                      ? 'bg-purple-600/20 border-purple-500 text-purple-300'
+                      : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                  }`}
+                >
+                  Local Path
+                </button>
+              </div>
+
+              {sourceType === 'github' ? (
+                <div className="space-y-4">
+                  <div>
+                    <input
+                      type="text"
+                      value={sourceUrl}
+                      onChange={(e) => setSourceUrl(e.target.value)}
+                      placeholder="https://github.com/user/repo"
+                      className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      disabled={isCreating || isImporting}
+                    />
+                    <p className="mt-1 text-sm text-gray-500">
+                      HTTPS or SSH URL. For private repos, set GITHUB_TOKEN environment variable.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Branch
+                    </label>
+                    <input
+                      type="text"
+                      value={sourceBranch}
+                      onChange={(e) => setSourceBranch(e.target.value)}
+                      placeholder="main"
+                      className="w-full px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      disabled={isCreating || isImporting}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    type="text"
+                    value={sourcePath}
+                    onChange={(e) => setSourcePath(e.target.value)}
+                    placeholder="/Users/you/projects/my-app"
+                    className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    disabled={isCreating || isImporting}
+                  />
+                  <p className="mt-1 text-sm text-gray-500">
+                    Absolute path to the codebase directory on your machine.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Change Specification */}
+            <div>
+              <label htmlFor="changeSpec" className="block text-sm font-medium text-gray-300 mb-2">
+                Change Specification
+              </label>
+              <textarea
+                id="changeSpec"
+                value={changeSpec}
+                onChange={(e) => setChangeSpec(e.target.value)}
+                placeholder="Describe what you want to change, improve, or add to the existing codebase. For example:&#10;&#10;- Add pagination to the user list API&#10;- Implement dark mode toggle&#10;- Fix the login bug where sessions expire too quickly&#10;- Refactor the database layer to use connection pooling"
+                rows={8}
+                className="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                disabled={isCreating || isImporting}
+              />
+              <p className="mt-1 text-sm text-gray-500">
+                Describe the modifications you want to make. The more specific, the better the generated tasks.
+              </p>
+            </div>
+          </>
+        )}
+
         {/* Sandbox Type */}
         <div>
           <label htmlFor="sandboxType" className="block text-sm font-medium text-gray-300 mb-2">
@@ -832,14 +973,20 @@ export default function CreateProjectPage() {
             disabled={
               isCreating ||
               isGenerating ||
+              isImporting ||
               !projectName ||
               !!nameValidationError ||
               (mode === 'upload' && specFiles.length === 0) ||
-              (mode === 'generate' && !generatedSpec.trim())
+              (mode === 'generate' && !generatedSpec.trim()) ||
+              (mode === 'import' && sourceType === 'github' && !sourceUrl.trim()) ||
+              (mode === 'import' && sourceType === 'local' && !sourcePath.trim())
             }
             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
           >
-            {isCreating ? 'Creating...' : 'Create Project'}
+            {isCreating
+              ? (mode === 'import' ? 'Importing...' : 'Creating...')
+              : (mode === 'import' ? 'Import & Create Project' : 'Create Project')
+            }
           </button>
         </div>
       </form>
@@ -850,10 +997,18 @@ export default function CreateProjectPage() {
           <div className="text-blue-500 text-xl">💡</div>
           <div>
             <div className="font-semibold text-blue-400 mb-1">
-              {mode === 'upload' ? 'What happens next?' : 'About AI Generation'}
+              {mode === 'import' ? 'About Brownfield Import' : mode === 'upload' ? 'What happens next?' : 'About AI Generation'}
             </div>
             <div className="text-sm text-gray-400 space-y-1">
-              {mode === 'upload' ? (
+              {mode === 'import' ? (
+                <>
+                  <p>1. Your codebase is copied/cloned into the project directory</p>
+                  <p>2. The codebase is automatically analyzed (languages, frameworks, tests)</p>
+                  <p>3. A feature branch is created for modifications</p>
+                  <p>4. The initializer explores existing code and creates a change roadmap</p>
+                  <p>5. Coding sessions modify existing code on the feature branch</p>
+                </>
+              ) : mode === 'upload' ? (
                 <>
                   <p>1. Project directory is created in generations/</p>
                   <p>2. Your spec file is saved as app_spec.txt</p>
@@ -863,11 +1018,11 @@ export default function CreateProjectPage() {
                 </>
               ) : (
                 <>
-                  <p>• AI analyzes your description and context files</p>
-                  <p>• Generates a complete specification with technical details</p>
-                  <p>• Validates the spec for completeness and feasibility</p>
-                  <p>• You can edit the generated spec before creating the project</p>
-                  <p>• The better your description, the better the specification</p>
+                  <p>- AI analyzes your description and context files</p>
+                  <p>- Generates a complete specification with technical details</p>
+                  <p>- Validates the spec for completeness and feasibility</p>
+                  <p>- You can edit the generated spec before creating the project</p>
+                  <p>- The better your description, the better the specification</p>
                 </>
               )}
             </div>

@@ -6,30 +6,31 @@ This file provides guidance to Claude Code when working with this repository.
 
 **YokeFlow 2** - An autonomous AI development platform that uses Claude to build complete applications over multiple sessions.
 
-**Status**: Production Ready - v2.0.0 (January 2026) ✅ **Complete Platform**
+**Status**: Production Ready - v2.2.0 (February 2026) ✅ **Brownfield Support**
 
 **Architecture**: API-first platform with FastAPI + Next.js Web UI + PostgreSQL + MCP task management
 
 **Workflow**: Opus plans roadmap (Session 0) → Sonnet implements features (Sessions 1+)
 
-**Latest Updates** (January 2026):
-- ✅ **REST API Complete**: 17 endpoints with comprehensive validation (89% coverage)
-- ✅ **Input Validation**: Pydantic-based validation framework (52 tests, 100% passing)
-- ✅ **Verification System**: Automated test generation & epic validation (fully integrated)
-- ✅ **Folder Reorganization**: All server code under `server/` with clear module separation
+**Latest Updates** (February 2026):
+- ✅ **Brownfield Support**: Import existing codebases from local paths or GitHub, analyze, and modify (43 tests)
+- ✅ **Codebase Analysis**: Detects 20+ languages, 15+ frameworks, test/CI systems automatically
+- ✅ **REST API Complete**: 60+ endpoints with comprehensive validation
+- ✅ **Quality System**: 8-phase quality system with test tracking and epic re-testing
 - ✅ **Production Hardening**: Database retry logic, intervention system, session checkpointing
-- ✅ **Structured Logging**: JSON + development formatters with context tracking
 - 🚀 **Clean Architecture**: No circular dependencies, clear module boundaries
-- ✅ **Quality Improvements** (Jan 12): Pattern detection, task-type verification, 30-40% faster testing
 
 ## Core Workflow
 
-**Session 0 (Initialization)**: Reads `app_spec.txt` → Creates epics/tasks/tests in PostgreSQL → Runs `init.sh`
+**Greenfield Session 0**: Reads `app_spec.txt` → Creates epics/tasks/tests in PostgreSQL → Runs `init.sh`
+
+**Brownfield Session 0**: Explores imported codebase → Reads `change_spec.md` → Creates scoped epics/tasks for modifications
 
 **Sessions 1+ (Coding)**: Get next task → Implement → Browser verify (with Playwright) → Update database → Git commit → Auto-continue
 
-**Key Files** (New Paths):
-- `server/agent/orchestrator.py` - Session lifecycle management
+**Key Files**:
+- `server/agent/orchestrator.py` - Session lifecycle management (greenfield + brownfield)
+- `server/agent/codebase_import.py` - Codebase import and analysis (brownfield)
 - `server/agent/agent.py` - Agent loop and session logic
 - `server/database/operations.py` - PostgreSQL abstraction (async) + retry logic
 - `server/database/retry.py` - Retry logic with exponential backoff (30 tests)
@@ -48,7 +49,7 @@ This file provides guidance to Claude Code when working with this repository.
 **Schema**: PostgreSQL with 3-tier hierarchy: `epics` → `tasks` → `tests`
 
 **Key tables**:
-- Core: `projects`, `epics`, `tasks`, `tests`, `sessions`, `session_quality_checks`
+- Core: `projects` (with `project_type`, `codebase_analysis` for brownfield), `epics`, `tasks`, `tests`, `sessions`, `session_quality_checks`
 - ✅ **Production Hardening**: `paused_sessions`, `intervention_actions`, `session_checkpoints` (011-012)
 - ✅ **Verification System**: `task_verifications`, `epic_validations`, `generated_tests` (013-016)
 
@@ -81,10 +82,12 @@ Must build before use: `cd mcp-task-manager && npm run build`
 - `models.initializer` / `models.coding` - Override default Opus/Sonnet models
 - `timing.auto_continue_delay` - Seconds between sessions (default 3)
 - `project.max_iterations` - Limit session count (null = unlimited)
+- `brownfield.default_feature_branch_prefix` - Branch prefix (default: `yokeflow/`)
+- `brownfield.run_existing_tests_before_changes` / `after_changes` - Regression safety (default: true)
 
 ## REST API
 
-**Endpoints**: 17+ RESTful endpoints for complete platform control
+**Endpoints**: 60+ RESTful endpoints for complete platform control
 
 **Key endpoints**:
 - Health: `/health`, `/health/detailed` - System health monitoring
@@ -92,19 +95,19 @@ Must build before use: `cd mcp-task-manager && npm run build`
 - Tasks: `/api/tasks/{id}`, `/api/tasks/{id}/status` - Task management
 - Epics: `/api/epics/{id}/progress` - Epic tracking
 - Quality: `/api/sessions/{id}/quality-review`, `/api/projects/{id}/quality-metrics`
+- Brownfield: `/api/projects/import`, `/api/projects/{id}/rollback` - Import & rollback
 
 **Documentation**: Interactive docs at `/docs` (Swagger UI) when API server running
-
-**Test Coverage**: 17/19 tests passing (2 auth tests deferred - auth not yet implemented)
 
 See [docs/api-usage.md](docs/api-usage.md) for complete endpoint reference and examples.
 
 ## Input Validation
 
-**Framework**: Pydantic-based validation with 19 models and 52 tests (100% passing)
+**Framework**: Pydantic-based validation with 20 models and 66 tests (100% passing)
 
 **What's validated**:
 - API requests: Project names, spec content, session parameters, environment variables
+- Brownfield imports: Source URLs, local paths, change spec content
 - Configuration: Model names, timing settings, Docker limits, database URLs
 - Sandbox: Memory/CPU limits, port mappings, E2B configuration
 - Verification: Test timeouts, coverage thresholds, webhook URLs
@@ -130,7 +133,8 @@ yokeflow2/
 ├── server/                  # All server code (reorganized)
 │   ├── agent/               # Session orchestration & lifecycle
 │   │   ├── agent.py         # Agent loop and session logic
-│   │   ├── orchestrator.py  # Session lifecycle management
+│   │   ├── orchestrator.py  # Session lifecycle management (greenfield + brownfield)
+│   │   ├── codebase_import.py  # Codebase import & analysis (brownfield)
 │   │   ├── session_manager.py  # Intervention system (DB persistence)
 │   │   ├── checkpoint.py    # Session checkpointing and recovery
 │   │   ├── intervention.py  # Blocker detection and retry tracking
@@ -195,6 +199,8 @@ yokeflow2/
 
 **Blocklist Security**: Agent autonomy with safety, designed for containers
 
+**Brownfield as Copy**: Imported codebases are copied to `generations/`, keeping originals safe. Feature branches isolate changes.
+
 ## Troubleshooting
 
 **MCP server failed**: Run `cd mcp-task-manager && npm run build`
@@ -221,12 +227,10 @@ yokeflow2/
 
 ## Testing
 
-**Test Suite Status** (January 8, 2026):
-- ✅ **72 core tests passing** (100% pass rate, < 30 seconds)
+**Test Suite Status** (February 2026):
+- ✅ **~255 total tests** across all test files (including 43 brownfield tests)
 - ✅ **70% coverage achieved** (target met)
 - ✅ **Production ready** with comprehensive test infrastructure
-- 📋 **~212 total tests** across all test files
-- ⏳ **29 tests skipped** (pending REST API implementation)
 
 **Quick Start**:
 ```bash
@@ -242,12 +246,15 @@ pytest --cov=server --cov-report=html --cov-report=term-missing
 
 **Key Test Files**:
 ```bash
-pytest tests/test_orchestrator.py        # Session lifecycle (17 tests)
-pytest tests/test_quality_integration.py # Quality system (10 tests)
-pytest tests/test_sandbox_manager.py     # Docker sandbox (17 tests)
-pytest tests/test_security.py            # Security validation (2 tests, 64 assertions)
-pytest tests/test_task_verifier.py       # Task verification (11 tests)
-pytest tests/test_test_generator.py      # Test generation (15 tests)
+pytest tests/test_orchestrator.py            # Session lifecycle (17 tests)
+pytest tests/test_codebase_import.py         # Brownfield import & analysis (19 tests)
+pytest tests/test_brownfield_orchestrator.py # Brownfield orchestration (10 tests)
+pytest tests/test_brownfield_validation.py   # Brownfield validation (14 tests)
+pytest tests/test_quality_integration.py     # Quality system (10 tests)
+pytest tests/test_sandbox_manager.py         # Docker sandbox (17 tests)
+pytest tests/test_security.py               # Security validation (2 tests, 64 assertions)
+pytest tests/test_task_verifier.py           # Task verification (11 tests)
+pytest tests/test_test_generator.py          # Test generation (15 tests)
 ```
 
 **Documentation**:
@@ -257,7 +264,8 @@ pytest tests/test_test_generator.py      # Test generation (15 tests)
 ## Important Files
 
 **Agent Core**:
-- `server/agent/orchestrator.py` - Session lifecycle
+- `server/agent/orchestrator.py` - Session lifecycle (greenfield + brownfield)
+- `server/agent/codebase_import.py` - Codebase import & analysis (brownfield)
 - `server/agent/agent.py` - Agent loop
 - `server/agent/session_manager.py` - Session management
 
@@ -266,8 +274,8 @@ pytest tests/test_test_generator.py      # Test generation (15 tests)
 - `server/database/retry.py` - Retry logic
 
 **API**:
-- `server/api/app.py` - FastAPI application (17+ endpoints)
-- `server/api/validation.py` - Pydantic validation models (19 models, 52 tests)
+- `server/api/app.py` - FastAPI application (60+ endpoints)
+- `server/api/validation.py` - Pydantic validation models (20 models, 66 tests)
 - `web-ui/src/lib/api.ts` - Frontend API client
 
 **Verification**:
@@ -392,6 +400,18 @@ state = await recovery.restore_from_checkpoint(checkpoint_id)
 
 ## Recent Changes
 
+**February 11, 2026 - v2.2.0 Brownfield Support**:
+- ✅ **Codebase Import**: Import from local paths or GitHub URLs (public + private repos)
+- ✅ **Codebase Analysis**: Detects languages, frameworks, test systems, CI, patterns (670-line module)
+- ✅ **Brownfield Prompts**: Dedicated initializer (scoped epics) and coding preamble (regression safety)
+- ✅ **Orchestrator**: `create_brownfield_project()` and `rollback_brownfield_changes()` methods
+- ✅ **API**: `POST /api/projects/import` and `POST /api/projects/{id}/rollback` endpoints
+- ✅ **Validation**: `ImportProjectRequest` Pydantic model with 14 tests
+- ✅ **Web UI**: "Import Codebase" mode on create page (GitHub URL or local path)
+- ✅ **Database**: `project_type`, `source_commit_sha`, `codebase_analysis` columns
+- ✅ **Configuration**: `BrownfieldConfig` with feature branch prefix and test safety settings
+- ✅ **Tests**: 43 new tests (import: 19, orchestrator: 10, validation: 14)
+
 **January 31 - February 2, 2026 - Quality System Completion**:
 - ✅ **Phase 0**: Database cleanup - Removed 34 unused objects (16 tables + 18 views)
 - ✅ **Phase 1**: Test execution tracking - Error details, retry counts, performance indexes
@@ -464,32 +484,32 @@ state = await recovery.restore_from_checkpoint(checkpoint_id)
 
 ## Philosophy
 
-**Greenfield Development**: Builds new applications from scratch, not modifying existing codebases.
+**Greenfield + Brownfield Development**: Builds new applications from scratch OR modifies existing codebases.
 
-**Workflow**: Create `app_spec.txt` → Initialize roadmap → Review → Autonomous coding → Completion verification
+**Greenfield Workflow**: Create `app_spec.txt` → Initialize roadmap → Review → Autonomous coding → Completion verification
+
+**Brownfield Workflow**: Import codebase → Analyze → Write `change_spec.md` → Scoped roadmap → Modify on feature branch → Verify
 
 **Core Principle**: One-shot success. Improve the agent system itself rather than fixing generated apps.
 
 ## Release Status
 
-**Current State**: Production Ready - v2.0.0
+**Current State**: Production Ready - v2.2.0
 
-**v2.0 Release Highlights**:
-- ✅ **REST API Complete**: 17 endpoints with 89% test coverage (17/19 passing)
-- ✅ **Input Validation**: Comprehensive Pydantic framework (52 tests, 100% passing)
-- ✅ **Verification System**: Automated test generation & epic validation (40 tests)
-- ✅ **Production Hardening**: Database retry logic, intervention system, session checkpointing
-- ✅ **Test Suite**: ~212 tests total, 70% coverage achieved (72 core tests, 100% pass rate)
-- ✅ **Clean Architecture**: All server code under `server/` with clear module separation
-- ✅ **Complete Documentation**: 11 docs updated, verification guide created (850+ lines)
-- ✅ **Database Schema**: Migrations 011-016 for all v2.0 features
-- ✅ **Quality System**: Automated reviews, dashboard, trend tracking
-- ✅ **Enterprise Ready**: Structured logging, error hierarchy, observability, Playwright integration
+**v2.2 Release Highlights**:
+- ✅ **Brownfield Support**: Import and modify existing codebases (local or GitHub)
+- ✅ **Codebase Analysis**: 20+ languages, 15+ frameworks, test/CI auto-detection
+- ✅ **Brownfield Prompts**: Specialized initializer and coding preamble for modifications
+- ✅ **Feature Branch Workflow**: Safe modifications with one-click rollback
+- ✅ **43 Brownfield Tests**: Comprehensive coverage for import, orchestration, and validation
+
+**Previous Releases**:
+- v2.1: Quality system (8 phases), 60+ API endpoints, 20+ MCP tools
+- v2.0: REST API, verification system, production hardening, clean architecture
 
 **Post-Release Roadmap**:
-- See `TODO-FUTURE.md` for planned enhancements
-- Per-user authentication, prompt improvements, E2B integration, and more
-- See `YOKEFLOW_REFACTORING_PLAN.md` for remaining P1/P2 improvements (59-69 hours)
+- See `YOKEFLOW_FUTURE_PLAN.md` for planned enhancements
+- GitHub push/PR automation, non-UI project support, E2B integration, and more
 
 ---
 
