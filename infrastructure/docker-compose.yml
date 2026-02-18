@@ -1,0 +1,331 @@
+# YokeFlow Unified Infrastructure
+# Combines YokeFlow2 + local-ai-packaged services
+#
+# Usage:
+#   Development (minimal):     docker compose up -d
+#   With AI services:          docker compose --profile ai up -d
+#   With all services:         docker compose --profile full up -d
+#   Production:                docker compose --profile production up -d
+#
+# LLM Configuration:
+#   - Claude API is PRIMARY (default for all operations)
+#   - LMStudio connects to host at localhost:1234 (MANDATORY for Personal Vault)
+#   - llama.cpp connects to host at localhost:8080 (future support)
+
+x-yokeflow-env: &yokeflow-env
+  environment:
+    # LLM Providers
+    - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    - LMSTUDIO_API_BASE=${LMSTUDIO_API_BASE:-http://host.docker.internal:1234/v1}
+    - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-local-model}
+    - LLAMACPP_API_BASE=${LLAMACPP_API_BASE:-http://host.docker.internal:8080/v1}
+    - LLM_PROVIDER=${LLM_PROVIDER:-claude}
+    # Database
+    - DATABASE_URL=postgresql://${POSTGRES_USER:-yokeflow}:${POSTGRES_PASSWORD:-yokeflow_dev}@postgres:5432/${POSTGRES_DB:-yokeflow}
+    # Vaults (LMStudio mandatory for Personal Vault)
+    - PERSONAL_VAULT_PATH=/vaults/personal
+    - AGENTS_VAULT_PATH=/vaults/agents
+    # Supabase (optional)
+    - SUPABASE_URL=${SUPABASE_URL:-}
+    - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+    - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+
+services:
+  # ============================================================================
+  # YOKEFLOW CORE SERVICES
+  # ============================================================================
+
+  yokeflow-api:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: yokeflow_api
+    restart: unless-stopped
+    ports:
+      - "${YOKEFLOW_PORT:-8000}:8000"
+    <<: *yokeflow-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Generated projects
+      - ../generations:/app/generations
+      # Vault access (Personal uses LMStudio, Agents uses Claude)
+      - ${PERSONAL_VAULT_PATH:-./vaults/personal}:/vaults/personal:ro
+      - ${AGENTS_VAULT_PATH:-./vaults/agents}:/vaults/agents:rw
+      # Docker socket for sandbox management
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - yokeflow_network
+
+  yokeflow-web:
+    build:
+      context: ../web-ui
+      dockerfile: Dockerfile
+    container_name: yokeflow_web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://yokeflow-api:8000
+    depends_on:
+      yokeflow-api:
+        condition: service_healthy
+    networks:
+      - yokeflow_network
+    profiles:
+      - full
+      - production
+
+  # ============================================================================
+  # DATABASE
+  # ============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: yokeflow_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-yokeflow}
+      POSTGRES_USER: ${POSTGRES_USER:-yokeflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yokeflow_dev_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../schema/postgresql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yokeflow} -d ${POSTGRES_DB:-yokeflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - yokeflow_network
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: yokeflow_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@yokeflow.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - yokeflow_network
+    profiles:
+      - tools
+
+  # ============================================================================
+  # AI SERVICES (from local-ai-packaged)
+  # ============================================================================
+
+  # Vector database for RAG
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: yokeflow_qdrant
+    restart: unless-stopped
+    expose:
+      - 6333/tcp
+      - 6334/tcp
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - yokeflow_network
+    profiles:
+      - ai
+      - full
+      - production
+
+  # Knowledge graph
+  neo4j:
+    image: neo4j:latest
+    container_name: yokeflow_neo4j
+    restart: unless-stopped
+    expose:
+      - 7473/tcp
+      - 7474/tcp
+      - 7687/tcp
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/yokeflow_password}
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - yokeflow_network
+    profiles:
+      - ai
+      - full
+      - production
+
+  # Workflow automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: yokeflow_n8n
+    restart: unless-stopped
+    expose:
+      - 5678/tcp
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-yokeflow}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-yokeflow_dev_password}
+      - DB_POSTGRESDB_DATABASE=n8n
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-n8n_encryption_key_change_me}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_JWT_SECRET:-n8n_jwt_secret_change_me}
+      - WEBHOOK_URL=http://localhost:5678
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - n8n_shared:/data/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - yokeflow_network
+    profiles:
+      - ai
+      - full
+
+  # Visual agent builder
+  flowise:
+    image: flowiseai/flowise:latest
+    container_name: yokeflow_flowise
+    restart: unless-stopped
+    expose:
+      - 3001/tcp
+    ports:
+      - "${FLOWISE_PORT:-3001}:3001"
+    environment:
+      - PORT=3001
+      - FLOWISE_USERNAME=${FLOWISE_USERNAME:-admin}
+      - FLOWISE_PASSWORD=${FLOWISE_PASSWORD:-flowise_password}
+      - DATABASE_PATH=/root/.flowise
+    volumes:
+      - flowise_storage:/root/.flowise
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - yokeflow_network
+    profiles:
+      - full
+
+  # Private web search
+  searxng:
+    image: searxng/searxng:latest
+    container_name: yokeflow_searxng
+    restart: unless-stopped
+    expose:
+      - 8080/tcp
+    ports:
+      - "${SEARXNG_PORT:-8080}:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    networks:
+      - yokeflow_network
+    profiles:
+      - full
+
+  # LLM observability
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: yokeflow_langfuse
+    restart: unless-stopped
+    expose:
+      - 3000/tcp
+    ports:
+      - "${LANGFUSE_PORT:-3002}:3000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-yokeflow}:${POSTGRES_PASSWORD:-yokeflow_dev_password}@postgres:5432/langfuse
+      - NEXTAUTH_URL=http://localhost:3002
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-langfuse_secret_change_me}
+      - SALT=${LANGFUSE_SALT:-langfuse_salt_change_me}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-langfuse_encryption_key_change_me}
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - yokeflow_network
+    profiles:
+      - production
+
+  # ============================================================================
+  # REVERSE PROXY (Production)
+  # ============================================================================
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: yokeflow_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - YOKEFLOW_HOSTNAME=${YOKEFLOW_HOSTNAME:-localhost}
+      - WEB_HOSTNAME=${WEB_HOSTNAME:-localhost}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-internal}
+    networks:
+      - yokeflow_network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    name: yokeflow_postgres_data
+  qdrant_storage:
+    name: yokeflow_qdrant_storage
+  neo4j_data:
+    name: yokeflow_neo4j_data
+  neo4j_logs:
+    name: yokeflow_neo4j_logs
+  n8n_storage:
+    name: yokeflow_n8n_storage
+  n8n_shared:
+    name: yokeflow_n8n_shared
+  flowise_storage:
+    name: yokeflow_flowise_storage
+  caddy_data:
+    name: yokeflow_caddy_data
+  caddy_config:
+    name: yokeflow_caddy_config
+
+networks:
+  yokeflow_network:
+    name: yokeflow_network
+    driver: bridge

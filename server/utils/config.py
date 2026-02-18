@@ -46,6 +46,39 @@ class ModelConfig:
 
 
 @dataclass
+class LLMConfig:
+    """Configuration for LLM providers and vault routing."""
+    # Primary provider (default) - Claude is primary
+    default_provider: str = field(default_factory=lambda: os.getenv(
+        "LLM_PROVIDER",
+        "claude"
+    ))
+
+    # Claude API
+    claude_api_key: Optional[str] = field(default_factory=lambda: os.getenv("CLAUDE_API_KEY"))
+
+    # LMStudio (MANDATORY for Personal Vault)
+    lmstudio_api_base: str = field(default_factory=lambda: os.getenv(
+        "LMSTUDIO_API_BASE",
+        "http://localhost:1234/v1"
+    ))
+    lmstudio_model: str = field(default_factory=lambda: os.getenv(
+        "LMSTUDIO_MODEL",
+        "local-model"
+    ))
+
+    # llama.cpp (future support)
+    llamacpp_api_base: str = field(default_factory=lambda: os.getenv(
+        "LLAMACPP_API_BASE",
+        "http://localhost:8080/v1"
+    ))
+
+    # Vault paths for routing
+    personal_vault_path: Optional[str] = field(default_factory=lambda: os.getenv("PERSONAL_VAULT_PATH"))
+    agents_vault_path: Optional[str] = field(default_factory=lambda: os.getenv("AGENTS_VAULT_PATH"))
+
+
+@dataclass
 class TimingConfig:
     """Configuration for timing and delays."""
     auto_continue_delay: int = 3  # seconds between sessions
@@ -190,9 +223,29 @@ class BrownfieldConfig:
 
 
 @dataclass
+class RemoteConfig:
+    """Configuration for remote control (Telegram, Slack, GitHub)."""
+    # Telegram
+    telegram_enabled: bool = field(default_factory=lambda: bool(os.getenv("TELEGRAM_BOT_TOKEN")))
+    telegram_bot_token: Optional[str] = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN"))
+    telegram_polling_timeout: int = 30
+
+    # Slack (future)
+    slack_enabled: bool = False
+    slack_bot_token: Optional[str] = None
+    slack_app_token: Optional[str] = None
+
+    # GitHub (future)
+    github_enabled: bool = False
+    github_token: Optional[str] = None
+    github_webhook_secret: Optional[str] = None
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     models: ModelConfig = field(default_factory=ModelConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     timing: TimingConfig = field(default_factory=TimingConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
@@ -203,6 +256,7 @@ class Config:
     verification: VerificationConfig = field(default_factory=VerificationConfig)
     epic_testing: EpicTestingConfig = field(default_factory=EpicTestingConfig)
     brownfield: BrownfieldConfig = field(default_factory=BrownfieldConfig)
+    remote: RemoteConfig = field(default_factory=RemoteConfig)
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'Config':
