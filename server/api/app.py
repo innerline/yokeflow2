@@ -77,6 +77,8 @@ from server.database.connection import DatabaseManager, is_postgresql_configured
 from server.utils.config import Config
 from server.utils.reset import reset_project
 from server.api.routes.prompt_improvements import router as prompt_improvements_router
+from server.api.routes.remote import router as remote_router, init_remote_control
+from server.api.routes.knowledge import router as knowledge_router, init_knowledge
 from server.utils.logging import (
     get_logger,
     set_request_id,
@@ -254,10 +256,54 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(periodic_cleanup())
     # logger.info("Started periodic stale session cleanup (every 5 minutes)")
 
+    # Initialize remote control (Telegram, Slack, GitHub)
+    telegram_adapter = None
+    command_handler = None
+    if config.remote.telegram_enabled and config.remote.telegram_bot_token:
+        try:
+            from server.remote.adapters.telegram import TelegramAdapter
+            from server.remote.commands import RemoteCommandHandler
+
+            command_handler = RemoteCommandHandler(
+                db_operations=None,  # Will be set later if needed
+                orchestrator=orchestrator
+            )
+
+            telegram_adapter = TelegramAdapter(
+                bot_token=config.remote.telegram_bot_token,
+                polling_timeout=config.remote.telegram_polling_timeout,
+                message_handler=command_handler.handle_message
+            )
+            command_handler.register_adapter("telegram", telegram_adapter)
+
+            # Start polling in background
+            await telegram_adapter.start()
+            logger.info("Telegram remote control started")
+
+            # Initialize remote routes with adapters
+            init_remote_control(telegram_adapter, command_handler)
+        except Exception as e:
+            logger.error(f"Failed to initialize Telegram remote control: {e}")
+
+    # Initialize knowledge layer
+    try:
+        init_knowledge()
+        logger.info("Knowledge layer initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize knowledge layer: {e}")
+
     yield
 
     # Shutdown: cancel background tasks and close database connections
     logger.info("API shutting down...")
+
+    # Stop remote control adapters
+    if telegram_adapter:
+        try:
+            await telegram_adapter.stop()
+            logger.info("Telegram remote control stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Telegram adapter: {e}")
 
     # Cancel periodic cleanup task
     if cleanup_task:
@@ -317,6 +363,8 @@ async def yokeflow_error_handler(request, exc: YokeFlowError):
 
 # Include routers
 app.include_router(prompt_improvements_router)
+app.include_router(remote_router)
+app.include_router(knowledge_router)
 
 # Load configuration
 config = Config.load_default()

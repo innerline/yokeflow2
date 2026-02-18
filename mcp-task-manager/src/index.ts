@@ -709,6 +709,126 @@ const tools: Tool[] = [
       },
       required: ['command']
     }
+  },
+  // Knowledge tools for Obsidian vault integration
+  {
+    name: 'knowledge_search',
+    description: 'Search the project knowledge vault for relevant information. Uses the configured Obsidian vault (personal vault uses LMStudio for privacy).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query'
+        },
+        vault_type: {
+          type: 'string',
+          enum: ['default', 'personal', 'agents'],
+          description: 'Which vault to search (default: default)'
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum results to return (default: 10)'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'knowledge_get_note',
+    description: 'Get a specific note from the knowledge vault by its path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note_path: {
+          type: 'string',
+          description: 'Relative path to the note within the vault'
+        },
+        vault_type: {
+          type: 'string',
+          enum: ['default', 'personal', 'agents'],
+          description: 'Which vault to use (default: default)'
+        }
+      },
+      required: ['note_path']
+    }
+  },
+  {
+    name: 'knowledge_create_note',
+    description: 'Create or update a note in the knowledge vault. Useful for auto-documentation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note_path: {
+          type: 'string',
+          description: 'Relative path for the note within the vault'
+        },
+        content: {
+          type: 'string',
+          description: 'Markdown content for the note'
+        },
+        vault_type: {
+          type: 'string',
+          enum: ['default', 'personal', 'agents'],
+          description: 'Which vault to use (default: agents)'
+        },
+        title: {
+          type: 'string',
+          description: 'Optional title for frontmatter'
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags for the note'
+        }
+      },
+      required: ['note_path', 'content']
+    }
+  },
+  {
+    name: 'knowledge_find_related',
+    description: 'Find notes related to a given note via wiki-style links.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note_path: {
+          type: 'string',
+          description: 'Path to the source note'
+        },
+        vault_type: {
+          type: 'string',
+          enum: ['default', 'personal', 'agents'],
+          description: 'Which vault to use (default: default)'
+        },
+        max_depth: {
+          type: 'number',
+          description: 'Maximum link depth to traverse (default: 2)'
+        }
+      },
+      required: ['note_path']
+    }
+  },
+  {
+    name: 'knowledge_list_notes',
+    description: 'List notes in the knowledge vault.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault_type: {
+          type: 'string',
+          enum: ['default', 'personal', 'agents'],
+          description: 'Which vault to use (default: default)'
+        },
+        pattern: {
+          type: 'string',
+          description: 'Glob pattern for filtering (default: *.md)'
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum notes to return (default: 50)'
+        }
+      }
+    }
   }
 
 ];
@@ -1333,6 +1453,211 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             ],
             isError: true
+          };
+        }
+
+      // Knowledge tools - interface to Python knowledge layer
+      // These provide structured access to Obsidian vaults via API
+
+      case 'knowledge_search':
+        // Call YokeFlow API for knowledge search
+        const searchQuery = args?.query as string;
+        const searchVaultType = (args?.vault_type as string) || 'default';
+        const searchLimit = (args?.limit as number) || 10;
+
+        console.error(`[knowledge_search] Searching: ${searchQuery} in ${searchVaultType}`);
+
+        try {
+          const apiUrl = process.env.YOKEFLOW_API_URL || 'http://localhost:8000';
+          const searchResponse = await fetch(
+            `${apiUrl}/api/knowledge/search?query=${encodeURIComponent(searchQuery)}&vault_type=${searchVaultType}&limit=${searchLimit}`
+          );
+
+          if (!searchResponse.ok) {
+            // Return placeholder if API not available
+            return {
+              content: [{
+                type: 'text',
+                text: `Knowledge search not available. Configure YOKEFLOW_API_URL and ensure knowledge layer is initialized.\n\nQuery was: ${searchQuery}`
+              }]
+            };
+          }
+
+          const searchResults = await searchResponse.json();
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(searchResults, null, 2)
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Knowledge search error: ${error.message}\n\nEnsure YOKEFLOW_API_URL is configured and knowledge layer is running.`
+            }]
+          };
+        }
+
+      case 'knowledge_get_note':
+        const getNotePath = args?.note_path as string;
+        const getNoteVaultType = (args?.vault_type as string) || 'default';
+
+        console.error(`[knowledge_get_note] Getting: ${getNotePath}`);
+
+        try {
+          const apiUrl = process.env.YOKEFLOW_API_URL || 'http://localhost:8000';
+          const noteResponse = await fetch(
+            `${apiUrl}/api/knowledge/notes/${encodeURIComponent(getNotePath)}?vault_type=${getNoteVaultType}`
+          );
+
+          if (!noteResponse.ok) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Note not found: ${getNotePath}\n\nEnsure the note exists in the ${getNoteVaultType} vault.`
+              }]
+            };
+          }
+
+          const noteData = await noteResponse.json();
+          return {
+            content: [{
+              type: 'text',
+              text: `# ${noteData.title || getNotePath}\n\n${noteData.content || 'No content'}`
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error fetching note: ${error.message}`
+            }]
+          };
+        }
+
+      case 'knowledge_create_note':
+        const createNotePath = args?.note_path as string;
+        const createNoteContent = args?.content as string;
+        const createNoteVaultType = (args?.vault_type as string) || 'agents';
+        const createNoteTitle = args?.title as string;
+        const createNoteTags = args?.tags as string[] || [];
+
+        console.error(`[knowledge_create_note] Creating: ${createNotePath}`);
+
+        try {
+          const apiUrl = process.env.YOKEFLOW_API_URL || 'http://localhost:8000';
+          const createResponse = await fetch(`${apiUrl}/api/knowledge/notes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              note_path: createNotePath,
+              content: createNoteContent,
+              vault_type: createNoteVaultType,
+              title: createNoteTitle,
+              tags: createNoteTags
+            })
+          });
+
+          if (!createResponse.ok) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Failed to create note: ${createNotePath}\n\nEnsure knowledge layer is running and vault is writable.`
+              }],
+              isError: true
+            };
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Note created successfully: ${createNotePath}\n\nIn vault: ${createNoteVaultType}`
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error creating note: ${error.message}`
+            }],
+            isError: true
+          };
+        }
+
+      case 'knowledge_find_related':
+        const relatedNotePath = args?.note_path as string;
+        const relatedVaultType = (args?.vault_type as string) || 'default';
+        const relatedMaxDepth = (args?.max_depth as number) || 2;
+
+        console.error(`[knowledge_find_related] Finding related to: ${relatedNotePath}`);
+
+        try {
+          const apiUrl = process.env.YOKEFLOW_API_URL || 'http://localhost:8000';
+          const relatedResponse = await fetch(
+            `${apiUrl}/api/knowledge/notes/${encodeURIComponent(relatedNotePath)}/related?vault_type=${relatedVaultType}&max_depth=${relatedMaxDepth}`
+          );
+
+          if (!relatedResponse.ok) {
+            return {
+              content: [{
+                type: 'text',
+                text: `No related notes found for: ${relatedNotePath}`
+              }]
+            };
+          }
+
+          const relatedData = await relatedResponse.json();
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(relatedData, null, 2)
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error finding related notes: ${error.message}`
+            }]
+          };
+        }
+
+      case 'knowledge_list_notes':
+        const listVaultType = (args?.vault_type as string) || 'default';
+        const listPattern = (args?.pattern as string) || '*.md';
+        const listLimit = (args?.limit as number) || 50;
+
+        console.error(`[knowledge_list_notes] Listing notes in ${listVaultType}`);
+
+        try {
+          const apiUrl = process.env.YOKEFLOW_API_URL || 'http://localhost:8000';
+          const listResponse = await fetch(
+            `${apiUrl}/api/knowledge/notes?vault_type=${listVaultType}&pattern=${encodeURIComponent(listPattern)}&limit=${listLimit}`
+          );
+
+          if (!listResponse.ok) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Knowledge vault not available. Configure YOKEFLOW_API_URL and ensure knowledge layer is initialized.`
+              }]
+            };
+          }
+
+          const listData = await listResponse.json();
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(listData, null, 2)
+            }]
+          };
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error listing notes: ${error.message}`
+            }]
           };
         }
 

@@ -612,6 +612,54 @@ class ApiClient {
     );
     return response.data;
   }
+
+  // =========================================================================
+  // Remote Control API
+  // =========================================================================
+
+  /**
+   * Get remote control status
+   */
+  async getRemoteStatus(): Promise<{
+    telegram_enabled: boolean;
+    telegram_bot_name?: string;
+    active_conversations: number;
+  }> {
+    const response = await this.client.get('/api/remote/status');
+    return response.data;
+  }
+
+  /**
+   * Get active remote conversations
+   */
+  async getRemoteConversations(): Promise<any[]> {
+    const response = await this.client.get('/api/remote/conversations');
+    return response.data.conversations;
+  }
+
+  /**
+   * Start Telegram polling
+   */
+  async startTelegramPolling(): Promise<{ status: string; message: string }> {
+    const response = await this.client.post('/api/remote/telegram/start');
+    return response.data;
+  }
+
+  /**
+   * Stop Telegram polling
+   */
+  async stopTelegramPolling(): Promise<{ status: string; message: string }> {
+    const response = await this.client.post('/api/remote/telegram/stop');
+    return response.data;
+  }
+
+  /**
+   * Set Telegram bot commands
+   */
+  async setTelegramCommands(): Promise<{ status: string; message: string }> {
+    const response = await this.client.post('/api/remote/telegram/commands');
+    return response.data;
+  }
 }
 
 // Export singleton instance
